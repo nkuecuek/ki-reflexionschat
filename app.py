@@ -104,7 +104,7 @@ def validate_response(text: str) -> bool:
         if phrase in lower:
             return False
 
-    match = re.search(r"(Was|Wie|Woran|Inwiefern|Welche)\b.*\?$", text)
+    match = re.search(r"(Was|Wie|Woran|Inwiefern|Welche)\\b.*\\?$", text)
     if not match:
         return False
 
@@ -357,8 +357,6 @@ def get_condition_label(cond: str) -> str:
         return "high-anthropomorph"
     return "low-anthropomorph"
 
-
-# ------------------ STREAMLIT-APP ------------------
 
 init_state()
 
