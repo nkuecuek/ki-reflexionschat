@@ -29,9 +29,6 @@ LLM_API_KEY = st.secrets.get("LLM_API_KEY", "")
 LLM_MODEL = st.secrets.get("LLM_MODEL", "gpt-4.1-mini")
 PROMPT_VERSION = "v1.0-2026-04-07"
 
-# Initiale Info ins Log schreiben
-log_error("init", f"BASE_URL={LLM_BASE_URL} MODEL={LLM_MODEL}")
-
 _client = None
 
 
@@ -53,8 +50,6 @@ def call_llm(system_prompt: str, messages: list[str], cond: str, session_id: str
     cond: Bedingung ("low" / "high") – hier nur zur Info weitergereicht.
     session_id: aktuelle Session-ID für das Fehler-Logging.
     """
-    log_error("call_llm_enter", f"cond={cond}", session_id=session_id)
-
     if not LLM_API_KEY:
         log_error("call_llm", "LLM_API_KEY fehlt oder ist leer", session_id=session_id)
         return ""
