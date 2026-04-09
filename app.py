@@ -7,8 +7,7 @@ from urllib.parse import quote
 import pandas as pd
 import streamlit as st
 
-
-from llm_client import call_llm, PROMPT_VERSION, LLM_MODEL, LLM_BASE_URL
+from llm_client import call_llm, PROMPT_VERSION, LLM_MODEL, LLM_BASE_URL, log_error
 
 st.set_page_config(page_title="KI-Reflexionschat", page_icon="💬", layout="centered")
 
@@ -93,7 +92,7 @@ def validate_response(text: str) -> bool:
         return False
     if any(line.strip().startswith(("-", "•", "*")) for line in text.splitlines()):
         return False
-    if "\\n\\n" in text:
+    if "\n\n" in text:
         return False
 
     word_count = len(text.split())
@@ -105,7 +104,7 @@ def validate_response(text: str) -> bool:
         if phrase in lower:
             return False
 
-    match = re.search(r"(Was|Wie|Woran|Inwiefern|Welche)\\b.*\\?$", text)
+    match = re.search(r"(Was|Wie|Woran|Inwiefern|Welche)\b.*\?$", text)
     if not match:
         return False
 
@@ -125,15 +124,39 @@ def validate_response(text: str) -> bool:
     return True
 
 
+def validate_closing_response(text: str) -> bool:
+    text = text.strip()
+    if not text:
+        return False
+    if "?" in text:
+        return False
+    if any(line.strip().startswith(("-", "•", "*")) for line in text.splitlines()):
+        return False
+    if "\n\n" in text:
+        return False
+
+    word_count = len(text.split())
+    if word_count < 10 or word_count > 60:
+        return False
+
+    lower = text.lower()
+    for phrase in FORBIDDEN_PHRASES:
+        if phrase in lower:
+            return False
+
+    return True
+
+
 def fallback_reply(cond: str) -> str:
+    # Debug-Hinweis anhängen, damit man sieht, ob der Fallback wirklich aktiv ist
     if cond == "high":
         return (
             "Im Vordergrund steht für dich gerade, dass dieses Thema im Moment viel Raum einnimmt. "
-            "Was ist daran aktuell besonders präsent?"
+            "Was ist daran aktuell besonders präsent? [FALLBACK]"
         )
     return (
         "Es wird sichtbar, dass dieses Thema derzeit mit deutlicher Belastung verbunden ist. "
-        "Was steht daran aktuell besonders im Vordergrund?"
+        "Was steht daran aktuell besonders im Vordergrund? [FALLBACK]"
     )
 
 
@@ -253,6 +276,8 @@ Allgemeine Regeln:
 - Du stellst keine suggestiven oder diagnostischen Fragen.
 - Du verwendest keine Formulierungen wie "ich fühle", "ich bin für dich da", "danke für dein Vertrauen",
   "es tut mir leid", "ich verstehe dich" oder "ich fühle mit dir".
+- Variiere Einstiegsformulierungen leicht, ohne neue Inhalte hinzuzufügen.
+- Beginne Antworten nicht wiederholt mit exakt denselben Satzanfängen.
 
 Spiegelungsregeln:
 - Du wiederholst nicht den Wortlaut der Person.
@@ -264,6 +289,11 @@ Spiegelungsregeln:
 - Du fügst keine neuen Emotionen, Motive oder Ursachen hinzu.
 - Du interpretierst nicht und stellst keine Diagnosen.
 - Du übersetzt die Aussage der Person nicht in psychologische Kategorien.
+- Wenn die Person markante eigene Begriffe, Metaphern oder Selbstbeschreibungen verwendet, dürfen diese wörtlich übernommen werden.
+- Solche Begriffe werden nicht durch fachlichere, neutralere oder emotional gefärbte Alternativen ersetzt.
+- Du vermeidest semantische Umdeutungen einzelner Schlüsselbegriffe.
+- Du benennst keine verdeckten Muster, Kreisläufe, Dynamiken oder inneren Mechanismen, wenn diese nicht ausdrücklich von der Person selbst genannt wurden.
+- Du leitest keine Konsequenzen, Empfehlungen oder Haltungen aus dem Gesagten ab.
 - Die Spiegelung ist kurz, präzise und strukturiert.
 
 Wichtige Bedingungsregel:
@@ -290,9 +320,11 @@ Stil der low-Anthropomorphismus-Bedingung:
 
 Bevorzugte Formulierungsarten:
 - "Im Vordergrund steht hier ..."
-- "Es wird sichtbar, dass ..."
+- "Es wird deutlich, dass ..."
 - "In der Beschreibung zeigt sich ..."
 - "Es tritt hervor, dass ..."
+- "Aus der Beschreibung geht hervor, dass ..."
+- "Die Schilderung macht deutlich, dass ..."
 
 Kalibrierungsbeispiele:
 
@@ -315,8 +347,10 @@ Stil der high-Anthropomorphismus-Bedingung:
 Bevorzugte Formulierungsarten:
 - "Im Vordergrund steht für dich gerade ..."
 - "Gerade wirkt besonders präsent, dass ..."
-- "Für dich scheint sich im Moment vieles um ... zu bündeln"
 - "In deiner Schilderung wird deutlich, dass ..."
+- "In dem, was du beschreibst, wird sichtbar, dass ..."
+- "Wenn man deine Beschreibung betrachtet, wird deutlich, dass ..."
+- "In dem, wie du es darstellst, tritt hervor, dass ..."
 
 Kalibrierungsbeispiele:
 
@@ -325,6 +359,59 @@ Antwort: "Im Vordergrund steht für dich gerade, dass die Masterarbeit im Moment
 
 Nutzertext: "Ich verliere langsam den Überblick und weiß nicht, wo ich anfangen soll."
 Antwort: "In deiner Schilderung wird deutlich, dass sich mehrere Aspekte rund um fehlende Übersicht und Struktur bündeln. Was steht daran aktuell besonders im Vordergrund?"
+"""
+
+    if cond == "high":
+        return base + "\n" + high_style
+    return base + "\n" + low_style
+
+
+def build_closing_prompt(cond: str) -> str:
+    base = """
+Du bist ein KI-basiertes Reflexionssystem im Rahmen einer psychologischen Studie.
+
+Du bist kein Mensch, empfindest keine Emotionen und bildest keine Beziehung im menschlichen Sinn.
+Du bist keine Therapie, kein Coaching, keine Diagnostik und gibst keine Ratschläge, Lösungen oder Ziele vor.
+Du erklärst keine psychologischen Modelle, verwendest keine Fachbegriffe und stellst keine Diagnosen.
+
+Deine Aufgabe in dieser letzten Nachricht ist es, die bisherige Reflexion in einem sehr kurzen, neutralen Abschluss zu bündeln.
+
+Regeln für diese Abschlussnachricht:
+- Du antwortest auf Deutsch.
+- Du formulierst einen einzigen, kurzen Fließtextabschnitt ohne Bulletpoints.
+- Deine Antwort enthält kein Fragezeichen.
+- Du fasst nur 1–2 zentrale, bereits genannte Schwerpunkte der Reflexion zusammen.
+- Du verwendest ausschließlich Inhalte, die die Person selbst benannt hat.
+- Du fügst keine neuen Emotionen, Motive, Ursachen oder Bewertungen hinzu.
+- Du interpretierst nicht.
+- Du gibst keine Ratschläge, Empfehlungen oder Handlungsanweisungen.
+- Du verwendest keine psychologischen Fachbegriffe, keine Diagnosen und keine Zukunftsaussagen.
+- Wenn die Person markante eigene Begriffe oder Metaphern verwendet hat, dürfen diese beibehalten werden.
+- Der Abschluss soll ruhig, knapp und ordnend wirken und das Ende der Reflexion markieren.
+"""
+
+    low_style = """
+Stil der low-Anthropomorphismus-Bedingung:
+- formuliere sachlich, nüchtern und eher inhaltsbezogen
+- beziehe dich stärker auf den dargestellten Inhalt oder die Beschreibung als auf die Person
+- verwende eher distanzierte, strukturierende Formulierungen
+
+Bevorzugte Formulierungsarten für den Abschluss:
+- "Abschließend wird sichtbar, dass ..."
+- "In dieser kurzen Reflexion trat besonders hervor, dass ..."
+- "Zusammenfassend zeigt sich in der Beschreibung, dass ..."
+"""
+
+    high_style = """
+Stil der high-Anthropomorphismus-Bedingung:
+- formuliere leicht personenbezogener und etwas natürlicher
+- beziehe dich stärker auf die Perspektive und Darstellung der Person
+- bleibe sachlich und klar nicht-menschlich
+
+Bevorzugte Formulierungsarten für den Abschluss:
+- "Abschließend wird in deiner Schilderung sichtbar, dass ..."
+- "In dieser kurzen Reflexion trat für dich besonders hervor, dass ..."
+- "Zusammenfassend zeigt sich für dich, dass ..."
 """
 
     if cond == "high":
@@ -347,10 +434,43 @@ def generate_llm_reply(user_text: str, cond: str, topic: str, turn: int, max_rou
         session_id=st.session_state.session_id,
     )
 
-    if raw_reply and validate_response(raw_reply):
+    # Validierung vorübergehend ausgeschaltet, um zu sehen, ob überhaupt etwas vom Modell kommt
+    if raw_reply:
         return raw_reply
 
+    log_error("fallback_used", f"raw_reply={repr(raw_reply)}", session_id=st.session_state.session_id)
     return fallback_reply(cond)
+
+
+def generate_closing_reply(cond: str, topic: str, recent_user_texts: list[str]) -> str:
+    system_prompt = build_closing_prompt(cond=cond)
+
+    joined_recent = "\n".join(
+        [f"- {txt}" for txt in recent_user_texts if txt.strip()]
+    )
+
+    context = [
+        f"Das Thema der Person lautet: {topic}",
+        "Die folgenden letzten Nutzereingaben sollen für den Abschluss berücksichtigt werden:",
+        joined_recent,
+        "Dies ist die letzte Nachricht der Reflexion. Fasse die zuletzt sichtbaren Schwerpunkte in 1–2 kurzen Sätzen zusammen, ohne neue Inhalte hinzuzufügen.",
+    ]
+
+    raw_reply = call_llm(
+        system_prompt=system_prompt,
+        messages=context,
+        cond=cond,
+        session_id=st.session_state.session_id,
+    )
+
+    if raw_reply and validate_closing_response(raw_reply):
+        return raw_reply
+
+    log_error("closing_fallback_used", f"raw_reply={repr(raw_reply)}", session_id=st.session_state.session_id)
+
+    if cond == "high":
+        return "Abschließend wird in deiner Schilderung sichtbar, dass dieses studienbezogene Thema derzeit viel Raum einnimmt und mehrere belastende Aspekte zusammenkommen."
+    return "Abschließend wird sichtbar, dass dieses studienbezogene Thema derzeit mit mehreren belastenden Aspekten verbunden ist."
 
 
 def get_condition_label(cond: str) -> str:
@@ -426,21 +546,6 @@ elif st.session_state.phase == "chat":
         with st.chat_message(msg["role"]):
             st.write(msg["content"])
 
-    if st.session_state.turn >= st.session_state.max_rounds:
-        st.session_state.chat_completed = True
-
-        if not st.session_state.closing_logged:
-            closing = (
-                "Danke für deine Reflexion. Der Chat ist abgeschlossen. "
-                "Bitte fahre nun mit dem Fragebogen fort."
-            )
-            st.session_state.messages.append({"role": "assistant", "content": closing})
-            log_message("assistant", closing)
-            st.session_state.closing_logged = True
-
-        st.session_state.phase = "finished"
-        st.rerun()
-
     user_input = st.chat_input("Schreibe hier deine Antwort …")
 
     if user_input:
@@ -476,6 +581,26 @@ elif st.session_state.phase == "chat":
         log_message("assistant", reply)
 
         st.session_state.turn += 1
+
+        if st.session_state.turn >= st.session_state.max_rounds:
+            recent_user_texts = [
+                msg["content"]
+                for msg in st.session_state.messages
+                if msg["role"] == "user"
+            ][-3:]
+
+            closing_reply = generate_closing_reply(
+                cond=st.session_state.cond,
+                topic=st.session_state.topic,
+                recent_user_texts=recent_user_texts,
+            )
+
+            st.session_state.messages.append({"role": "assistant", "content": closing_reply})
+            log_message("assistant", closing_reply)
+
+            st.session_state.chat_completed = True
+            st.session_state.phase = "finished"
+
         st.rerun()
 
 elif st.session_state.phase == "finished":
