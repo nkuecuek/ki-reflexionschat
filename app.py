@@ -6,8 +6,6 @@ from urllib.parse import quote
 
 import pandas as pd
 import streamlit as st
-st.write("Has LLM_API_KEY:", "LLM_API_KEY" in st.secrets)
-st.write("Len LLM_API_KEY:", len(st.secrets.get("LLM_API_KEY", "")))
 
 
 from llm_client import call_llm, PROMPT_VERSION, LLM_MODEL, LLM_BASE_URL
