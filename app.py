@@ -377,7 +377,7 @@ Nutzertext: "Ich verliere langsam den Überblick und weiß nicht, wo ich anfange
 Antwort: "In der Beschreibung zeigt sich, dass mehrere Aspekte mit fehlender Übersicht und Struktur verbunden sind. Was steht daran aktuell besonders im Vordergrund?"
 """
 
-high_style = """
+    high_style = """
 Stil der high-Anthropomorphismus-Bedingung:
 
 - formuliere konsequent subjektbezogen aus der Perspektive der Person (z. B. „für dich“, „in deinem Erleben“)
