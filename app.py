@@ -781,7 +781,7 @@ elif st.session_state.phase == "finished":
     if st.session_state.safety_triggered:
         st.warning(
             "Die Sitzung wurde aus Sicherheitsgründen beendet. "
-            "Dieser Chat kann in solchen Situationen keine angemessene Unterstützung leisten."
+            "Dieser Chat ist nicht dafür geeignet, in solchen Situationen Unterstützung zu bieten."
         )
 
         st.markdown(
