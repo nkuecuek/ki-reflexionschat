@@ -779,7 +779,29 @@ elif st.session_state.phase == "finished":
     st.success("Der Chatteil ist beendet.")
 
     if st.session_state.safety_triggered:
-        st.warning("Die Sitzung wurde aus Sicherheitsgründen beendet.")
+        st.warning(
+            "Die Sitzung wurde aus Sicherheitsgründen beendet. "
+            "Dieser Chat kann in solchen Situationen keine angemessene Unterstützung leisten."
+        )
+
+        st.markdown(
+            """
+Bitte wenden Sie sich an eine vertraute Person oder an professionelle Hilfe.
+
+**Telefonseelsorge (kostenlos und anonym):**  
+0800 111 0 111  
+0800 111 0 222  
+
+**Bei akuter Gefahr:**  
+112
+"""
+        )
+
+        st.info(
+            "Sie müssen den Fragebogen nicht weiter ausfüllen. "
+            "Sie können dieses Browserfenster jetzt schließen."
+        )
+
     else:
         st.write(
             "Vielen Dank für deine Teilnahme an diesem Chatteil. "
@@ -790,21 +812,21 @@ elif st.session_state.phase == "finished":
             "Falls unten ein Button angezeigt wird, kannst du auch darauf klicken."
         )
 
-    if st.session_state.return_url:
-        safe_url = quote(st.session_state.return_url, safe=":/?&=%#")
-        st.markdown(
-            f'<a href="{safe_url}" target="_self" '
-            'style="text-decoration:none;color:#111111;display:inline-block;">'
-            '<div style="display:inline-block;padding:0.7rem 1rem;'
-            'background:#e9dfcf;color:#111111;border-radius:0.6rem;'
-            'font-weight:600;border:1px solid #cbbda8;">Zurück zum Fragebogen</div></a>',
-            unsafe_allow_html=True,
-        )
-    else:
-        st.info(
-            "Es wurde kein automatischer Rücksprunglink übermittelt. "
-            "Bitte wechsle manuell zurück zum Fragebogen-Tab in deinem Browser und fahre dort fort."
-        )
+        if st.session_state.return_url:
+            safe_url = quote(st.session_state.return_url, safe=":/?&=%#")
+            st.markdown(
+                f'<a href="{safe_url}" target="_self" '
+                'style="text-decoration:none;color:#111111;display:inline-block;">'
+                '<div style="display:inline-block;padding:0.7rem 1rem;'
+                'background:#e9dfcf;color:#111111;border-radius:0.6rem;'
+                'font-weight:600;border:1px solid #cbbda8;">Zurück zum Fragebogen</div></a>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.info(
+                "Es wurde kein automatischer Rücksprunglink übermittelt. "
+                "Bitte wechsle manuell zurück zum Fragebogen-Tab in deinem Browser und fahre dort fort."
+            )
 
     if st.session_state.debug_mode:
         st.markdown("### Sitzungsdaten (lokale Vorschau)")
