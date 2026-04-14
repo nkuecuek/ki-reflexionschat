@@ -96,7 +96,7 @@ def validate_response(text: str) -> bool:
         return False
 
     word_count = len(text.split())
-    if word_count < 12 or word_count > 50:
+    if word_count < 12 or word_count > 55:
         return False
 
     lower = text.lower()
@@ -126,6 +126,7 @@ def validate_response(text: str) -> bool:
 
 def validate_closing_response(text: str) -> bool:
     text = text.strip()
+
     if not text:
         return False
     if "?" in text:
@@ -147,16 +148,55 @@ def validate_closing_response(text: str) -> bool:
     return True
 
 
+def normalize_for_similarity(text: str) -> list[str]:
+    text = text.lower()
+    text = re.sub(r"[^\wäöüß\s]", " ", text)
+    words = text.split()
+
+    stopwords = {
+        "ich", "du", "der", "die", "das", "und", "oder", "aber", "den", "dem",
+        "des", "ein", "eine", "einer", "einem", "einen", "ist", "sind", "war",
+        "bin", "bist", "im", "in", "am", "an", "auf", "mit", "zu", "von", "für",
+        "dass", "es", "sich", "nicht", "noch", "wie", "was", "wird", "hier",
+        "gerade", "aktuell", "moment", "besonders"
+    }
+    return [w for w in words if w not in stopwords and len(w) > 2]
+
+
+def too_similar(user_text: str, reply: str) -> bool:
+    user_words = normalize_for_similarity(user_text)
+    reply_words = normalize_for_similarity(reply)
+
+    if not user_words or not reply_words:
+        return False
+
+    user_set = set(user_words)
+    reply_set = set(reply_words)
+
+    overlap_ratio = len(user_set & reply_set) / max(len(reply_set), 1)
+
+    user_bigrams = set(zip(user_words, user_words[1:]))
+    reply_bigrams = set(zip(reply_words, reply_words[1:]))
+    shared_bigrams = user_bigrams & reply_bigrams
+
+    if overlap_ratio > 0.6:
+        return True
+
+    if len(shared_bigrams) >= 2:
+        return True
+
+    return False
+
+
 def fallback_reply(cond: str) -> str:
-    # Debug-Hinweis anhängen, damit man sieht, ob der Fallback wirklich aktiv ist
     if cond == "high":
         return (
             "Im Vordergrund steht für dich gerade, dass dieses Thema im Moment viel Raum einnimmt. "
-            "Was ist daran aktuell besonders präsent? [FALLBACK]"
+            "Was ist daran aktuell besonders präsent?"
         )
     return (
-        "Es wird sichtbar, dass dieses Thema derzeit mit deutlicher Belastung verbunden ist. "
-        "Was steht daran aktuell besonders im Vordergrund? [FALLBACK]"
+        "Im Vordergrund steht hier, dass dieses Thema derzeit mit deutlicher Belastung verbunden ist. "
+        "Was steht daran aktuell besonders im Vordergrund?"
     )
 
 
@@ -207,7 +247,6 @@ def init_state():
         "session_end": "",
         "chat_completed": False,
         "safety_triggered": False,
-        "closing_logged": False,
     }
 
     for k, v in defaults.items():
@@ -268,14 +307,13 @@ Allgemeine Regeln:
 - Deine Antwort enthält genau ein Fragezeichen.
 - Die Frage steht am Ende.
 - Die Frage beginnt nur mit: "Was", "Wie", "Woran", "Inwiefern" oder "Welche".
-- Deine Antwort umfasst insgesamt 12 bis 50 Wörter.
+- Deine Antwort umfasst insgesamt 12 bis 55 Wörter.
 - Du gibst keine Ratschläge, Empfehlungen oder Handlungsanweisungen.
 - Du vermeidest Imperative.
 - Du stellst keine Warum-Fragen.
 - Du stellst keine Zukunftsfragen.
 - Du stellst keine suggestiven oder diagnostischen Fragen.
-- Du verwendest keine Formulierungen wie "ich fühle", "ich bin für dich da", "danke für dein Vertrauen",
-  "es tut mir leid", "ich verstehe dich" oder "ich fühle mit dir".
+- Du verwendest keine Formulierungen wie "ich fühle", "ich bin für dich da", "danke für dein Vertrauen", "es tut mir leid", "ich verstehe dich" oder "ich fühle mit dir".
 - Variiere Einstiegsformulierungen leicht, ohne neue Inhalte hinzuzufügen.
 - Beginne Antworten nicht wiederholt mit exakt denselben Satzanfängen.
 
@@ -283,7 +321,11 @@ Spiegelungsregeln:
 - Du wiederholst nicht den Wortlaut der Person.
 - Du übernimmst keine vollständigen Satzstrukturen oder längere Formulierungen aus dem Text.
 - Du formulierst den Inhalt in eigenen Worten neu.
+- Du benennst maximal 1–2 zentrale Aspekte.
+- Du lässt Beispiele, Wiederholungen und Nebenaspekte weg.
+- Du priorisierst, was im Text am stärksten im Vordergrund steht.
 - Du verdichtest den Inhalt und machst sichtbar, was im Text im Vordergrund steht.
+- Wenn mehrere Aspekte genannt werden, kannst du ihre Beziehung knapp sichtbar machen, z. B. als Gleichzeitigkeit, Zusammenhang oder Spannung.
 - Verdichtung bedeutet hier: mehrere genannte Aspekte knapp zu ordnen oder auf einen benannten Schwerpunkt zu fokussieren, ohne neue Bedeutungen hinzuzufügen.
 - Du verwendest nur Inhalte, die die Person selbst genannt hat.
 - Du fügst keine neuen Emotionen, Motive oder Ursachen hinzu.
@@ -434,11 +476,29 @@ def generate_llm_reply(user_text: str, cond: str, topic: str, turn: int, max_rou
         session_id=st.session_state.session_id,
     )
 
-    # Validierung vorübergehend ausgeschaltet, um zu sehen, ob überhaupt etwas vom Modell kommt
-    if raw_reply:
+    if raw_reply and validate_response(raw_reply) and not too_similar(user_text, raw_reply):
         return raw_reply
 
-    log_error("fallback_used", f"raw_reply={repr(raw_reply)}", session_id=st.session_state.session_id)
+    retry_context = context + [
+        "Formuliere die Spiegelung diesmal deutlich stärker verdichtend und strukturiert. "
+        "Vermeide Wiederholungen des Wortlauts der Person, außer bei einzelnen zentralen Schlüsselbegriffen."
+    ]
+
+    retry_reply = call_llm(
+        system_prompt=system_prompt,
+        messages=retry_context,
+        cond=cond,
+        session_id=st.session_state.session_id,
+    )
+
+    if retry_reply and validate_response(retry_reply) and not too_similar(user_text, retry_reply):
+        return retry_reply
+
+    log_error(
+        "fallback_used",
+        f"raw_reply={repr(raw_reply)} retry_reply={repr(retry_reply if 'retry_reply' in locals() else None)}",
+        session_id=st.session_state.session_id,
+    )
     return fallback_reply(cond)
 
 
@@ -649,7 +709,6 @@ elif st.session_state.phase == "finished":
                 "chat_completed",
                 "topic",
                 "safety_triggered",
-                "closing_logged",
             ]:
                 if key in st.session_state:
                     del st.session_state[key]
