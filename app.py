@@ -1,6 +1,6 @@
 import csv
 import re
-from datetime import datetime
+from datetime import datetime, UTC
 from pathlib import Path
 from urllib.parse import quote
 
@@ -39,7 +39,11 @@ QUESTION_START_WORDS = ["Was", "Wie", "Woran", "Inwiefern", "Welche"]
 
 
 def now_iso() -> str:
-    return datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    return datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def utc_stamp() -> str:
+    return datetime.now(UTC).strftime("%Y%m%d%H%M%S")
 
 
 def ensure_csv_files():
@@ -158,7 +162,8 @@ def normalize_for_similarity(text: str) -> list[str]:
         "des", "ein", "eine", "einer", "einem", "einen", "ist", "sind", "war",
         "bin", "bist", "im", "in", "am", "an", "auf", "mit", "zu", "von", "für",
         "dass", "es", "sich", "nicht", "noch", "wie", "was", "wird", "hier",
-        "gerade", "aktuell", "moment", "besonders"
+        "gerade", "aktuell", "moment", "besonders", "dabei", "steht", "tritt",
+        "zeigt", "deutlich", "vordergrund"
     }
     return [w for w in words if w not in stopwords and len(w) > 2]
 
@@ -191,7 +196,7 @@ def too_similar(user_text: str, reply: str) -> bool:
 def fallback_reply(cond: str) -> str:
     if cond == "high":
         return (
-            "Im Vordergrund steht für dich gerade, dass dieses Thema im Moment viel Raum einnimmt. "
+            "Für dich steht gerade im Vordergrund, dass dieses Thema im Moment viel Raum einnimmt. "
             "Was ist daran aktuell besonders präsent?"
         )
     return (
@@ -221,7 +226,7 @@ def init_state():
         cond = "low"
 
     if not pid:
-        pid = f"test_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+        pid = f"test_{utc_stamp()}"
 
     return_url = get_param("return_url", "")
     max_rounds = get_param("rounds", "5")
@@ -242,7 +247,7 @@ def init_state():
         "messages": [],
         "turn": 0,
         "topic": "",
-        "session_id": f"{pid}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}",
+        "session_id": f"{pid}_{utc_stamp()}",
         "session_start": now_iso(),
         "session_end": "",
         "chat_completed": False,
@@ -340,7 +345,7 @@ Spiegelungsregeln:
 
 Wichtige Bedingungsregel:
 - Die inhaltliche Qualität, Tiefe und Struktur der Antwort bleibt in beiden Bedingungen gleich.
-- Variiert wird ausschließlich die sprachliche Perspektive (inhaltlich orientiert vs. leicht personenbezogen).
+- Variiert wird ausschließlich die sprachliche Perspektive (inhaltlich orientiert vs. leicht subjektbezogen).
 - Es dürfen keine zusätzlichen Inhalte, Bewertungen oder impliziten Bedeutungen zwischen den Bedingungen entstehen.
 - Die Frage bleibt in beiden Bedingungen gleich offen und gleich wenig lenkend.
 - Die Frage soll den bereits benannten Schwerpunkt weiter öffnen, nicht das Thema wechseln.
@@ -379,19 +384,16 @@ Antwort: "In der Beschreibung zeigt sich, dass mehrere Aspekte mit fehlender Üb
 
     high_style = """
 Stil der high-Anthropomorphismus-Bedingung:
-
-- formuliere konsequent subjektbezogen aus der Perspektive der Person (z. B. „für dich“, „in deinem Erleben“)
-- vermeide rein beobachtende, distanzierte Formulierungen wie „in der Beschreibung zeigt sich“
-- die sprachliche Nähe entsteht ausschließlich durch Perspektivübernahme, nicht durch Empathie
+- formuliere leicht subjektbezogen aus der Perspektive der Person
+- die sprachliche Nähe entsteht ausschließlich durch Perspektivbezug, nicht durch Empathie
 - bleibe sachlich, klar und nicht-menschlich
 - vermeide jede Form von emotionaler Validierung, Mitgefühl oder Beziehungssprache
 - interpretiere nicht und füge keine neuen Inhalte hinzu
 - verwende keine psychologischen Fachbegriffe oder Diagnosen
 - die Antwort darf sich sprachlich näher an der Person anfühlen, aber nicht unterstützend oder tröstend wirken
-- verwende häufiger Formulierungen wie „für dich“, ohne sie in jedem Satz zu wiederholen
+- nutze Formulierungen wie "für dich" oder "in deinem Erleben" zurückhaltend und nicht in jedem Satz
 
 Bevorzugte Formulierungsarten:
-
 - "Für dich steht gerade im Vordergrund, dass ..."
 - "Für dich scheint sich im Moment vieles um ... zu bündeln"
 - "In deinem Erleben wird deutlich, dass ..."
@@ -399,10 +401,9 @@ Bevorzugte Formulierungsarten:
 - "In dem, wie du es beschreibst, zeigt sich für dich, dass ..."
 - "Für dich tritt dabei besonders hervor, dass ..."
 
-Fragegestaltung (wichtig):
-
+Fragegestaltung:
 - die Frage bleibt offen und nicht lenkend
-- sie darf leicht subjektbezogen formuliert sein (z. B. „für dich“), aber ohne zusätzliche Interpretation
+- sie darf leicht subjektbezogen formuliert sein, aber ohne zusätzliche Interpretation
 - sie darf keine emotionale Bewertung enthalten
 
 Beispiele für Fragen:
@@ -419,6 +420,35 @@ Nutzertext: "Ich verliere langsam den Überblick und weiß nicht, wo ich anfange
 Antwort: "In deinem Erleben wird deutlich, dass sich mehrere Aspekte rund um fehlende Übersicht und Orientierung bündeln. Was steht dabei für dich im Moment besonders im Vordergrund?"
 """
 
+    if cond == "high":
+        return base + "\n" + high_style
+    return base + "\n" + low_style
+
+
+def build_closing_prompt(cond: str) -> str:
+    base = """
+Du bist ein KI-basiertes Reflexionssystem im Rahmen einer psychologischen Studie.
+
+Du bist kein Mensch, empfindest keine Emotionen und bildest keine Beziehung im menschlichen Sinn.
+Du bist keine Therapie, kein Coaching, keine Diagnostik und gibst keine Ratschläge, Lösungen oder Ziele vor.
+Du erklärst keine psychologischen Modelle, verwendest keine Fachbegriffe und stellst keine Diagnosen.
+
+Deine Aufgabe in dieser letzten Nachricht ist es, die bisherige Reflexion in einem sehr kurzen, neutralen Abschluss zu bündeln.
+
+Regeln für diese Abschlussnachricht:
+- Du antwortest auf Deutsch.
+- Du formulierst einen einzigen, kurzen Fließtextabschnitt ohne Bulletpoints.
+- Deine Antwort enthält kein Fragezeichen.
+- Du fasst nur 1–2 zentrale, bereits genannte Schwerpunkte der Reflexion zusammen.
+- Du verwendest ausschließlich Inhalte, die die Person selbst benannt hat.
+- Du fügst keine neuen Emotionen, Motive, Ursachen oder Bewertungen hinzu.
+- Du interpretierst nicht.
+- Du gibst keine Ratschläge, Empfehlungen oder Handlungsanweisungen.
+- Du verwendest keine psychologischen Fachbegriffe, keine Diagnosen und keine Zukunftsaussagen.
+- Wenn die Person markante eigene Begriffe oder Metaphern verwendet hat, dürfen diese beibehalten werden.
+- Der Abschluss soll ruhig, knapp und ordnend wirken und das Ende der Reflexion markieren.
+"""
+
     low_style = """
 Stil der low-Anthropomorphismus-Bedingung:
 - formuliere sachlich, nüchtern und eher inhaltsbezogen
@@ -433,8 +463,8 @@ Bevorzugte Formulierungsarten für den Abschluss:
 
     high_style = """
 Stil der high-Anthropomorphismus-Bedingung:
-- formuliere leicht personenbezogener und etwas natürlicher
-- beziehe dich stärker auf die Perspektive und Darstellung der Person
+- formuliere leicht subjektbezogen, aber nicht empathisch
+- beziehe dich stärker auf die Perspektive der Person
 - bleibe sachlich und klar nicht-menschlich
 
 Bevorzugte Formulierungsarten für den Abschluss:
