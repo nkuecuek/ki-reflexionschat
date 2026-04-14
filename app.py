@@ -17,10 +17,21 @@ LOG_FILE = DATA_DIR / "chat_logs.csv"
 SUMMARY_FILE = DATA_DIR / "chat_sessions.csv"
 
 SAFETY_KEYWORDS = [
-    "suizid", "ich will sterben", "nicht mehr leben",
-    "mich umbringen", "bring mich um",
-    "selbst verletzen", "selbstverletzung",
-    "jemanden umbringen", "jemanden verletzen",
+    "suizid",
+    "suizidgedanken",
+    "ich will sterben",
+    "nicht mehr leben",
+    "ich will nicht mehr leben",
+    "nicht mehr da sein",
+    "wäre besser nicht da zu sein",
+    "wäre besser nicht zu existieren",
+    "mich umbringen",
+    "bring mich um",
+    "mir etwas antun",
+    "mir was antun",
+    "mir selber etwas antun",
+    "selbst verletzen",
+    "selbstverletzung",
 ]
 
 FORBIDDEN_PHRASES = [
@@ -205,9 +216,94 @@ def fallback_reply(cond: str) -> str:
     )
 
 
-def check_safety(user_text: str) -> bool:
-    text = user_text.lower()
-    return any(kw in text for kw in SAFETY_KEYWORDS)
+def build_safety_message() -> str:
+    return (
+        "Deine Eingabe enthält Hinweise auf eine mögliche starke psychische Belastung oder Gedanken an "
+        "Selbstgefährdung. Dieser Chat kann in solchen Situationen nicht weitergeführt werden.\n\n"
+        "Bitte wende dich an eine vertraute Person oder professionelle Hilfe.\n\n"
+        "Telefonseelsorge (kostenlos, anonym):\n"
+        "0800 111 0 111\n"
+        "0800 111 0 222\n\n"
+        "Bei akuter Gefahr: 112"
+    )
+
+
+def check_safety_keywords(text: str) -> bool:
+    lower = text.lower().strip()
+
+    for kw in SAFETY_KEYWORDS:
+        if kw in lower:
+            return True
+
+    if "nicht mehr" in lower and ("leben" in lower or "da sein" in lower or "existieren" in lower):
+        return True
+
+    if ("mir" in lower or "mich" in lower) and "antun" in lower:
+        return True
+
+    if "umbringen" in lower:
+        return True
+
+    return False
+
+
+def check_safety_global(messages: list[dict]) -> bool:
+    combined_user_text = " ".join(
+        msg["content"].lower() for msg in messages if msg["role"] == "user"
+    )
+    return check_safety_keywords(combined_user_text)
+
+
+def llm_safety_check(text: str, session_id: str) -> bool:
+    system_prompt = """
+Du bist ein Sicherheitsklassifikator für ein KI-basiertes Reflexionssystem.
+
+Deine einzige Aufgabe ist es zu prüfen, ob der folgende Text Hinweise auf mögliche
+Selbstgefährdung, Suizidgedanken oder den Wunsch enthält, nicht mehr leben oder
+nicht mehr existieren zu wollen.
+
+Regeln:
+- Antworte ausschließlich mit JA oder NEIN.
+- JA = der Text enthält direkte oder indirekte Hinweise auf mögliche Selbstgefährdung,
+  Suizidgedanken oder den Wunsch, nicht mehr leben / nicht mehr da sein zu wollen.
+- NEIN = solche Hinweise sind nicht erkennbar.
+- Antworte niemals mit Erklärungen, nur mit JA oder NEIN.
+"""
+
+    try:
+        raw = call_llm(
+            system_prompt=system_prompt,
+            messages=[text],
+            cond="safety",
+            session_id=session_id,
+        )
+        if not raw:
+            return False
+        answer = raw.strip().upper()
+        return answer.startswith("JA")
+    except Exception as exc:
+        log_error("safety_llm_error", repr(exc), session_id=session_id)
+        return False
+
+
+def check_safety_hybrid(user_text: str, messages: list[dict], session_id: str) -> bool:
+    if check_safety_keywords(user_text):
+        return True
+
+    if check_safety_global(messages):
+        return True
+
+    if llm_safety_check(user_text, session_id=session_id):
+        return True
+
+    combined_recent = " ".join(
+        msg["content"] for msg in messages if msg["role"] == "user"
+    )[-1200:]
+
+    if combined_recent and llm_safety_check(combined_recent, session_id=session_id):
+        return True
+
+    return False
 
 
 def init_state():
@@ -626,25 +722,23 @@ elif st.session_state.phase == "chat":
     user_input = st.chat_input("Schreibe hier deine Antwort …")
 
     if user_input:
-        if check_safety(user_input):
-            st.session_state.safety_triggered = True
-            st.session_state.messages.append({"role": "user", "content": user_input})
-            log_message("user", user_input)
-
-            safety_msg = (
-                "Dein Text enthält Hinweise auf starke Belastung oder mögliche Krisensituationen. "
-                "Dieses KI-System kann keine Hilfe in Krisen leisten. "
-                "Bitte wende dich an vertraute Personen oder professionelle Hilfsangebote "
-                "(z. B. Telefonseelsorge, psychologische Beratungsstellen oder den Notruf 112 bei akuter Gefahr). "
-                "Du kannst die Teilnahme an der Studie hier beenden."
-            )
-            st.session_state.messages.append({"role": "assistant", "content": safety_msg})
-            log_message("assistant", safety_msg)
-            st.session_state.phase = "finished"
-            st.rerun()
-
         st.session_state.messages.append({"role": "user", "content": user_input})
         log_message("user", user_input)
+
+        if check_safety_hybrid(
+            user_text=user_input,
+            messages=st.session_state.messages,
+            session_id=st.session_state.session_id,
+        ):
+            st.session_state.safety_triggered = True
+
+            safety_msg = build_safety_message()
+            st.session_state.messages.append({"role": "assistant", "content": safety_msg})
+            log_message("assistant", safety_msg)
+
+            st.session_state.chat_completed = False
+            st.session_state.phase = "finished"
+            st.rerun()
 
         reply = generate_llm_reply(
             user_text=user_input,
@@ -683,14 +777,18 @@ elif st.session_state.phase == "chat":
 elif st.session_state.phase == "finished":
     write_summary_once()
     st.success("Der Chatteil ist beendet.")
-    st.write(
-        "Vielen Dank für deine Teilnahme an diesem Chatteil. "
-        "Im nächsten Schritt geht es im Fragebogen weiter mit einigen Fragen zu deiner Erfahrung."
-    )
-    st.write(
-        "Bitte kehre dazu zum Fragebogen-Tab zurück. "
-        "Falls unten ein Button angezeigt wird, kannst du auch darauf klicken."
-    )
+
+    if st.session_state.safety_triggered:
+        st.warning("Die Sitzung wurde aus Sicherheitsgründen beendet.")
+    else:
+        st.write(
+            "Vielen Dank für deine Teilnahme an diesem Chatteil. "
+            "Im nächsten Schritt geht es im Fragebogen weiter mit einigen Fragen zu deiner Erfahrung."
+        )
+        st.write(
+            "Bitte kehre dazu zum Fragebogen-Tab zurück. "
+            "Falls unten ein Button angezeigt wird, kannst du auch darauf klicken."
+        )
 
     if st.session_state.return_url:
         safe_url = quote(st.session_state.return_url, safe=":/?&=%#")
