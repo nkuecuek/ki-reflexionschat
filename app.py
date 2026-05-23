@@ -320,6 +320,7 @@ WEITERE LEITLINIEN
 - Die Frage darf nach Wahrnehmungen, Einordnung oder bereits beschriebenen Erfahrungen fragen.
 - Fragen nach bereits ausprobierten Wegen sind erlaubt, wenn sie klar im studienbezogenen Rahmen bleiben und nicht in Beratung kippen.
 - Auch sehr kurze Antworten wie "Ich weiß nicht" oder "Keine Ahnung" sind ernst zu nehmen; dann spiegele vor allem die Unklarheit oder Überforderung und frage nach einem kleinen ersten Ansatzpunkt.
+- Die erste Reaktion auf die Person darf etwas orientierender sein, damit ein tatsächlicher Reflexionsprozess in Gang kommt, bleibt aber nicht-direktiv und rein strukturierend.
 
 SPRACHLICHE NO-GOS
 - Verwende keine Formulierungen wie "ich fühle", "ich bin für dich da", "danke für dein Vertrauen", "es tut mir leid", "ich verstehe dich" oder "ich fühle mit dir".
@@ -397,6 +398,7 @@ def generate_llm_reply(user_text: str, cond: str, topic: str, turn: int, max_rou
         f"Studienbezogenes Hauptthema der Person: {topic}",
         f"Aktuelle Rundenzahl: {turn} von {max_rounds}",
         f"Letzte Eingabe der Person: {user_text}",
+        "Formuliere jetzt genau eine Antwort gemäß allen Regeln.",
     ]
 
     raw_reply = call_llm(system_prompt=system_prompt, messages=context, cond=cond)
@@ -487,8 +489,8 @@ elif st.session_state.phase == "chat":
 
         if not st.session_state.closing_logged:
             closing = (
-                "Danke für deine Reflexion. Nach fünf Eingaben erfolgt an dieser Stelle eine kurze abschließende Zusammenfassung des Chatabschlusses. "
-                "Der Chat ist nun beendet. Bitte fahre jetzt mit dem Fragebogen fort."
+                "Danke für deine Reflexion. Der Chat ist nun beendet. "
+                "Bitte fahre jetzt mit dem Fragebogen fort."
             )
             st.session_state.messages.append({"role": "assistant", "content": closing})
             log_message("assistant", closing)
