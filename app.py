@@ -1,4 +1,5 @@
 import csv
+import os
 import re
 from datetime import datetime
 from pathlib import Path
@@ -6,8 +7,7 @@ from urllib.parse import quote
 
 import pandas as pd
 import streamlit as st
-
-from llm_client import call_llm
+from openai import OpenAI
 
 st.set_page_config(page_title="KI-Reflexionschat", page_icon="💬", layout="centered")
 
@@ -85,13 +85,6 @@ def get_debug_mode() -> bool:
     return raw_debug in {"1", "true", "yes", "on"}
 
 
-def is_very_short_user_input(text: str) -> bool:
-    cleaned = text.strip()
-    if not cleaned:
-        return True
-    return len(cleaned.split()) <= 4
-
-
 def validate_response(text: str) -> bool:
     text = text.strip()
 
@@ -107,7 +100,7 @@ def validate_response(text: str) -> bool:
         return False
 
     word_count = len(text.split())
-    if word_count < 8 or word_count > 70:
+    if word_count < 8 or word_count > 55:
         return False
 
     lower = text.lower()
@@ -151,12 +144,12 @@ def fallback_reply(cond: str, user_text: str = "") -> str:
 
     if cond == "high":
         return (
-            "In deiner Schilderung wird deutlich, dass dieses studienbezogene Thema im Moment viel Raum einnimmt und dich belastet. "
-            "Was ist daran für dich gerade besonders präsent?"
+            "Du beschreibst, dass dieses studienbezogene Thema im Moment viel Raum einnimmt und dich belastet. "
+            "Was daran ist gerade besonders präsent?"
         )
     return (
-        "Hier wird deutlich, dass dieses studienbezogene Thema derzeit viel Raum einnimmt und mit Belastung verbunden ist. "
-        "Was steht daran aktuell besonders im Vordergrund?"
+        "Deutlich wird hier, dass dieses studienbezogene Thema derzeit viel Raum einnimmt und mit Belastung verbunden ist. "
+        "Was ist daran aktuell besonders wichtig?"
     )
 
 
@@ -366,32 +359,53 @@ Wichtig:
     return base + "\n" + low_style
 
 
+def build_message_history(topic: str, current_user_text: str) -> list[dict]:
+    history = [
+        {
+            "role": "system",
+            "content": f"Studienbezogenes Hauptthema der Person: {topic}"
+        }
+    ]
+
+    for msg in st.session_state.messages[-8:]:
+        if msg["role"] == "assistant":
+            history.append({"role": "assistant", "content": msg["content"]})
+        elif msg["role"] == "user":
+            history.append({"role": "user", "content": msg["content"]})
+
+    history.append({"role": "user", "content": current_user_text})
+    return history
+
+
+def call_llm(system_prompt: str, topic: str, user_text: str) -> str:
+    api_key = os.getenv("OPENAI_API_KEY") or st.secrets.get("OPENAI_API_KEY", None)
+    if not api_key:
+        raise RuntimeError("OPENAI_API_KEY wurde nicht gefunden.")
+
+    client = OpenAI(api_key=api_key)
+
+    messages = [{"role": "system", "content": system_prompt}] + build_message_history(topic, user_text)
+
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        temperature=0.4,
+        max_tokens=120,
+        messages=messages,
+    )
+
+    return response.choices[0].message.content.strip()
+
+
 def generate_llm_reply(user_text: str, cond: str, topic: str, turn: int, max_rounds: int) -> str:
     system_prompt = build_system_prompt(cond=cond, max_rounds=max_rounds)
 
-    context = [
-        f"Studienbezogenes Hauptthema der Person: {topic}",
-        f"Aktuelle Rundenzahl: {turn} von {max_rounds}",
-        f"Letzte Eingabe der Person: {user_text}",
-    ]
-
-    raw_reply = call_llm(
-        system_prompt=system_prompt,
-        messages=context,
-        cond=cond,
-        session_id=st.session_state.session_id,
-    )
-
-    if st.session_state.debug_mode:
-        with st.sidebar:
-            st.markdown("#### LLM-Rohantwort")
-            st.write(raw_reply)
-            st.write("Valid?", validate_response(raw_reply))
-
-    if validate_response(raw_reply):
-        return raw_reply
-
-    return fallback_reply(cond, user_text=user_text)
+    try:
+        raw_reply = call_llm(system_prompt=system_prompt, topic=topic, user_text=user_text)
+        if validate_response(raw_reply):
+            return raw_reply
+        return fallback_reply(cond, user_text=user_text)
+    except Exception:
+        return fallback_reply(cond, user_text=user_text)
 
 
 def get_condition_label(cond: str) -> str:
@@ -399,8 +413,6 @@ def get_condition_label(cond: str) -> str:
         return "high-anthropomorph"
     return "low-anthropomorph"
 
-
-# ------------------ STREAMLIT-APP ------------------
 
 init_state()
 
@@ -419,8 +431,6 @@ if st.session_state.debug_mode:
                 "rounds": st.session_state.max_rounds,
             }
         )
-        st.markdown("### Modus")
-        st.info("Debugmodus aktiv (llm_client.py)")
         st.markdown("### Session")
         st.write({"session_id": st.session_state.session_id})
 
@@ -490,12 +500,12 @@ elif st.session_state.phase == "chat":
     user_input = st.chat_input("Schreibe hier deine Antwort …")
 
     if user_input:
+        st.session_state.messages.append({"role": "user", "content": user_input})
+        log_message("user", user_input)
+        st.session_state.user_messages_count += 1
+
         if check_safety(user_input):
             st.session_state.safety_triggered = True
-            st.session_state.messages.append({"role": "user", "content": user_input})
-            log_message("user", user_input)
-            st.session_state.user_messages_count += 1
-
             safety_msg = (
                 "Dein Text enthält Hinweise auf starke Belastung oder mögliche Krisensituationen. "
                 "Dieses KI-System kann in Krisen keine Hilfe leisten. "
@@ -507,10 +517,6 @@ elif st.session_state.phase == "chat":
             log_message("assistant", safety_msg)
             st.session_state.phase = "finished"
             st.rerun()
-
-        st.session_state.messages.append({"role": "user", "content": user_input})
-        log_message("user", user_input)
-        st.session_state.user_messages_count += 1
 
         reply = generate_llm_reply(
             user_text=user_input,
@@ -560,21 +566,3 @@ elif st.session_state.phase == "finished":
             df = pd.read_csv(LOG_FILE)
             session_df = df[df["session_id"] == st.session_state.session_id]
             st.dataframe(session_df, use_container_width=True)
-
-        if st.button("Neue Testsitzung starten"):
-            for key in [
-                "phase",
-                "messages",
-                "turn",
-                "session_id",
-                "session_start",
-                "session_end",
-                "chat_completed",
-                "topic",
-                "safety_triggered",
-                "closing_logged",
-                "user_messages_count",
-            ]:
-                if key in st.session_state:
-                    del st.session_state[key]
-            st.rerun()
