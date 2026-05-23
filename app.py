@@ -6,7 +6,8 @@ from urllib.parse import quote
 
 import pandas as pd
 import streamlit as st
-from openai import OpenAI
+
+from llm_client import call_llm
 
 st.set_page_config(page_title="KI-Reflexionschat", page_icon="💬", layout="centered")
 
@@ -37,9 +38,6 @@ FORBIDDEN_PHRASES = [
 ]
 
 QUESTION_START_WORDS = ["Was", "Wie", "Woran", "Inwiefern", "Welche"]
-
-# OpenAI-Client (Secret muss in st.secrets["OPENAI_API_KEY"] stehen)
-client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
 
 def now_iso() -> str:
@@ -105,11 +103,11 @@ def validate_response(text: str) -> bool:
         return False
     if any(line.strip().startswith(("-", "•", "*")) for line in text.splitlines()):
         return False
-    if "\\n\\n" in text:
+    if "\n\n" in text:
         return False
 
     word_count = len(text.split())
-    if word_count < 8 or word_count > 55:
+    if word_count < 8 or word_count > 70:
         return False
 
     lower = text.lower()
@@ -117,7 +115,7 @@ def validate_response(text: str) -> bool:
         if phrase in lower:
             return False
 
-    match = re.search(r"(Was|Wie|Woran|Inwiefern|Welche)\\b.*\\?$", text)
+    match = re.search(r"(Was|Wie|Woran|Inwiefern|Welche)\b.*\?$", text)
     if not match:
         return False
 
@@ -186,7 +184,7 @@ def init_state():
         pid = f"test_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
 
     return_url = get_param("return_url", "")
-    max_rounds = get_param("rounds", "5")  # Default weiterhin 5
+    max_rounds = get_param("rounds", "5")
     debug_mode = get_debug_mode()
 
     try:
@@ -368,27 +366,6 @@ Wichtig:
     return base + "\n" + low_style
 
 
-def call_llm(system_prompt: str, messages: list[str], cond: str) -> str:
-    """
-    Ruft das OpenAI-Chatmodell mit Systemprompt und Kontext auf
-    und gibt den Antworttext zurück.
-    """
-    user_content = "\n".join(messages)
-
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        temperature=0.5,
-        max_tokens=220,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_content},
-        ],
-    )
-
-    content = response.choices[0].message.content or ""
-    return content.strip()
-
-
 def generate_llm_reply(user_text: str, cond: str, topic: str, turn: int, max_rounds: int) -> str:
     system_prompt = build_system_prompt(cond=cond, max_rounds=max_rounds)
 
@@ -398,7 +375,12 @@ def generate_llm_reply(user_text: str, cond: str, topic: str, turn: int, max_rou
         f"Letzte Eingabe der Person: {user_text}",
     ]
 
-    raw_reply = call_llm(system_prompt=system_prompt, messages=context, cond=cond)
+    raw_reply = call_llm(
+        system_prompt=system_prompt,
+        messages=context,
+        cond=cond,
+        session_id=st.session_state.session_id,
+    )
 
     if st.session_state.debug_mode:
         with st.sidebar:
@@ -438,7 +420,7 @@ if st.session_state.debug_mode:
             }
         )
         st.markdown("### Modus")
-        st.info("Debugmodus aktiv (OpenAI)")
+        st.info("Debugmodus aktiv (llm_client.py)")
         st.markdown("### Session")
         st.write({"session_id": st.session_state.session_id})
 
