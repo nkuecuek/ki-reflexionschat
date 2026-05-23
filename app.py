@@ -6,6 +6,7 @@ from urllib.parse import quote
 
 import pandas as pd
 import streamlit as st
+from openai import OpenAI
 
 st.set_page_config(page_title="KI-Reflexionschat", page_icon="💬", layout="centered")
 
@@ -36,6 +37,9 @@ FORBIDDEN_PHRASES = [
 ]
 
 QUESTION_START_WORDS = ["Was", "Wie", "Woran", "Inwiefern", "Welche"]
+
+# OpenAI-Client (Secret muss in st.secrets["OPENAI_API_KEY"] stehen)
+client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
 
 def now_iso() -> str:
@@ -101,7 +105,7 @@ def validate_response(text: str) -> bool:
         return False
     if any(line.strip().startswith(("-", "•", "*")) for line in text.splitlines()):
         return False
-    if "\n\n" in text:
+    if "\\n\\n" in text:
         return False
 
     word_count = len(text.split())
@@ -113,7 +117,7 @@ def validate_response(text: str) -> bool:
         if phrase in lower:
             return False
 
-    match = re.search(r"(Was|Wie|Woran|Inwiefern|Welche)\b.*\?$", text)
+    match = re.search(r"(Was|Wie|Woran|Inwiefern|Welche)\\b.*\\?$", text)
     if not match:
         return False
 
@@ -182,7 +186,7 @@ def init_state():
         pid = f"test_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
 
     return_url = get_param("return_url", "")
-    max_rounds = get_param("rounds", "5")
+    max_rounds = get_param("rounds", "5")  # Default weiterhin 5
     debug_mode = get_debug_mode()
 
     try:
@@ -366,18 +370,23 @@ Wichtig:
 
 def call_llm(system_prompt: str, messages: list[str], cond: str) -> str:
     """
-    Platzhalter-Funktion für den echten LLM-Call.
-    Diese Funktion muss für die echte Studie durch einen realen API-Call ersetzt werden.
+    Ruft das OpenAI-Chatmodell mit Systemprompt und Kontext auf
+    und gibt den Antworttext zurück.
     """
-    if cond == "high":
-        return (
-            "In deiner Schilderung wird deutlich, dass dieses studienbezogene Thema im Moment viel Raum einnimmt und dich belastet. "
-            "Was ist daran für dich gerade besonders präsent?"
-        )
-    return (
-        "Hier wird deutlich, dass dieses studienbezogene Thema derzeit viel Raum einnimmt und mit Belastung verbunden ist. "
-        "Was steht daran aktuell besonders im Vordergrund?"
+    user_content = "\n".join(messages)
+
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        temperature=0.5,
+        max_tokens=220,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content},
+        ],
     )
+
+    content = response.choices[0].message.content or ""
+    return content.strip()
 
 
 def generate_llm_reply(user_text: str, cond: str, topic: str, turn: int, max_rounds: int) -> str:
@@ -390,6 +399,13 @@ def generate_llm_reply(user_text: str, cond: str, topic: str, turn: int, max_rou
     ]
 
     raw_reply = call_llm(system_prompt=system_prompt, messages=context, cond=cond)
+
+    if st.session_state.debug_mode:
+        with st.sidebar:
+            st.markdown("#### LLM-Rohantwort")
+            st.write(raw_reply)
+            st.write("Valid?", validate_response(raw_reply))
+
     if validate_response(raw_reply):
         return raw_reply
 
@@ -422,7 +438,7 @@ if st.session_state.debug_mode:
             }
         )
         st.markdown("### Modus")
-        st.info("Debug-/Testmodus aktiv (LLM-Platzhalter)")
+        st.info("Debugmodus aktiv (OpenAI)")
         st.markdown("### Session")
         st.write({"session_id": st.session_state.session_id})
 
