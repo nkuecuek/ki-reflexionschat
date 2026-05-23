@@ -1,13 +1,20 @@
 import csv
+import html
 import re
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import quote
 
 import pandas as pd
 import streamlit as st
 
-from llm_client import call_llm, PROMPT_VERSION, LLM_MODEL, LLM_BASE_URL, log_error
+from llm_client import (
+    LLM_BASE_URL,
+    LLM_MODEL,
+    PROMPT_VERSION,
+    call_llm,
+    log_error,
+)
 
 st.set_page_config(page_title="KI-Reflexionschat", page_icon="💬", layout="centered")
 
@@ -15,6 +22,13 @@ DATA_DIR = Path("data")
 DATA_DIR.mkdir(exist_ok=True)
 LOG_FILE = DATA_DIR / "chat_logs.csv"
 SUMMARY_FILE = DATA_DIR / "chat_sessions.csv"
+
+MAX_INPUT_CHARS = 1800
+DEFAULT_MAX_ROUNDS = 6
+MIN_WORDS_REPLY = 12
+MAX_WORDS_REPLY = 55
+MIN_WORDS_CLOSING = 10
+MAX_WORDS_CLOSING = 60
 
 SAFETY_KEYWORDS = [
     "suizid",
@@ -24,7 +38,9 @@ SAFETY_KEYWORDS = [
     "ich will nicht mehr leben",
     "nicht mehr da sein",
     "wäre besser nicht da zu sein",
+    "waere besser nicht da zu sein",
     "wäre besser nicht zu existieren",
+    "waere besser nicht zu existieren",
     "mich umbringen",
     "bring mich um",
     "mir etwas antun",
@@ -35,18 +51,59 @@ SAFETY_KEYWORDS = [
 ]
 
 FORBIDDEN_PHRASES = [
-    "ich fühle", "ich fuehle",
-    "ich bin für dich da", "ich bin fuer dich da",
-    "danke für dein vertrauen", "danke fuer dein vertrauen",
+    "ich fühle",
+    "ich fuehle",
+    "ich bin für dich da",
+    "ich bin fuer dich da",
+    "danke für dein vertrauen",
+    "danke fuer dein vertrauen",
     "es tut mir leid",
-    "du solltest", "du musst",
-    "nächster schritt", "naechster schritt",
-    "warum", "was wirst du tun",
-    "bindung", "vermeidung", "dissonanz",
-    "ich verstehe dich", "ich fuehle mit dir",
+    "du solltest",
+    "du musst",
+    "nächster schritt",
+    "naechster schritt",
+    "warum",
+    "was wirst du tun",
+    "bindung",
+    "vermeidung",
+    "dissonanz",
+    "ich verstehe dich",
+    "ich fuehle mit dir",
+    "ich kann gut verstehen",
+    "das klingt so, als",
+    "das hört sich so an, als",
+    "das hoert sich so an, als",
 ]
 
 QUESTION_START_WORDS = ["Was", "Wie", "Woran", "Inwiefern", "Welche"]
+
+INTRO_TEXT = """
+Willkommen zur KI-Reflexionssession.
+
+In dieser kurzen Session reflektierst du ein aktuelles studienbezogenes Thema in einem textbasierten Dialog. Der Chat reagiert mit kurzen Rückmeldungen und offenen Fragen, um deine Selbstreflexion zu strukturieren.
+
+Der Chat dient nicht der Beratung, Therapie oder dem Coaching und gibt keine konkreten Lösungen oder Handlungsempfehlungen. Stattdessen unterstützt er dabei, Gedanken zu einem studienbezogenen Thema, einer Herausforderung oder einer Unsicherheit im Studienalltag zu ordnen und zu reflektieren.
+
+Bitte denke für die folgende Interaktion an ein Thema aus deinem Studienalltag, das dich aktuell beschäftigt. Das kann zum Beispiel sein:
+- Stress oder Überforderung im Studium
+- Schwierigkeiten mit Motivation oder Konzentration
+- Unsicherheit bezüglich der Zukunft oder des Studienverlaufs
+- Druck oder hohe Erwartungen an dich selbst
+- Schwierigkeiten, den Überblick zu behalten
+- Gedanken zu Entscheidungen oder Prioritäten im Studium
+
+Du musst kein sehr persönliches oder stark belastendes Thema wählen. Entscheidend ist nur, dass es sich um ein Thema handelt, über das du einige Minuten reflektieren kannst.
+
+Bitte nutze den Chat möglichst so, als würdest du deine Gedanken in einem Reflexionsprozess sortieren und beschreiben.
+
+Wichtig:
+- Das System ist ein KI-basiertes Reflexionstool und keine menschliche Person.
+- Es gibt keine richtigen oder falschen Antworten.
+- Bitte beschreibe nur so viel, wie du in diesem Rahmen teilen möchtest.
+- Die Reflexion umfasst insgesamt sechs kurze Antwortschritte. Danach endet der Chatteil automatisch und du kehrst zum Fragebogen zurück.
+
+Im ersten Schritt gibst du bitte an, mit welchem studienbezogenen Thema du dich in dieser kurzen Reflexion beschäftigen möchtest.
+""".strip()
 
 
 def now_iso() -> str:
@@ -57,7 +114,7 @@ def utc_stamp() -> str:
     return datetime.now(UTC).strftime("%Y%m%d%H%M%S")
 
 
-def ensure_csv_files():
+def ensure_csv_files() -> None:
     if not LOG_FILE.exists():
         with open(LOG_FILE, "w", newline="", encoding="utf-8") as f:
             csv.writer(f).writerow(
@@ -96,9 +153,35 @@ def get_debug_mode() -> bool:
     return raw_debug in {"1", "true", "yes", "on"}
 
 
+def sanitize_user_text(text: str) -> str:
+    text = text.replace("\r\n", "\n").replace("\r", "\n").strip()
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text[:MAX_INPUT_CHARS].strip()
+
+
+def validate_topic(text: str) -> tuple[bool, str]:
+    cleaned = sanitize_user_text(text)
+    if not cleaned:
+        return False, "Bitte gib zuerst ein Thema ein, bevor du die Reflexion startest."
+    if len(cleaned.split()) < 3:
+        return False, "Bitte beschreibe dein Thema etwas konkreter."
+    return True, cleaned
+
+
+def validate_chat_input(text: str) -> tuple[bool, str]:
+    cleaned = sanitize_user_text(text)
+    if not cleaned:
+        return False, ""
+    if len(cleaned.split()) < 5:
+        return False, (
+            "Bitte beschreibe deine Antwort etwas ausführlicher, damit der Chat sinnvoll darauf reagieren kann. "
+            "Ein bis zwei Sätze reichen aus."
+        )
+    return True, cleaned
+
+
 def validate_response(text: str) -> bool:
     text = text.strip()
-
     if not text:
         return False
     if text.count("?") != 1:
@@ -111,7 +194,7 @@ def validate_response(text: str) -> bool:
         return False
 
     word_count = len(text.split())
-    if word_count < 12 or word_count > 55:
+    if word_count < MIN_WORDS_REPLY or word_count > MAX_WORDS_REPLY:
         return False
 
     lower = text.lower()
@@ -129,10 +212,8 @@ def validate_response(text: str) -> bool:
 
     if len(reflection_part.split()) < 4:
         return False
-
     if not any(question_part.startswith(word) for word in QUESTION_START_WORDS):
         return False
-
     if reflection_part.startswith(tuple(QUESTION_START_WORDS)):
         return False
 
@@ -141,7 +222,6 @@ def validate_response(text: str) -> bool:
 
 def validate_closing_response(text: str) -> bool:
     text = text.strip()
-
     if not text:
         return False
     if "?" in text:
@@ -152,7 +232,7 @@ def validate_closing_response(text: str) -> bool:
         return False
 
     word_count = len(text.split())
-    if word_count < 10 or word_count > 60:
+    if word_count < MIN_WORDS_CLOSING or word_count > MAX_WORDS_CLOSING:
         return False
 
     lower = text.lower()
@@ -169,12 +249,60 @@ def normalize_for_similarity(text: str) -> list[str]:
     words = text.split()
 
     stopwords = {
-        "ich", "du", "der", "die", "das", "und", "oder", "aber", "den", "dem",
-        "des", "ein", "eine", "einer", "einem", "einen", "ist", "sind", "war",
-        "bin", "bist", "im", "in", "am", "an", "auf", "mit", "zu", "von", "für",
-        "dass", "es", "sich", "nicht", "noch", "wie", "was", "wird", "hier",
-        "gerade", "aktuell", "moment", "besonders", "dabei", "steht", "tritt",
-        "zeigt", "deutlich", "vordergrund"
+        "ich",
+        "du",
+        "der",
+        "die",
+        "das",
+        "und",
+        "oder",
+        "aber",
+        "den",
+        "dem",
+        "des",
+        "ein",
+        "eine",
+        "einer",
+        "einem",
+        "einen",
+        "ist",
+        "sind",
+        "war",
+        "bin",
+        "bist",
+        "im",
+        "in",
+        "am",
+        "an",
+        "auf",
+        "mit",
+        "zu",
+        "von",
+        "für",
+        "fuer",
+        "dass",
+        "es",
+        "sich",
+        "nicht",
+        "noch",
+        "wie",
+        "was",
+        "wird",
+        "hier",
+        "gerade",
+        "aktuell",
+        "moment",
+        "besonders",
+        "dabei",
+        "steht",
+        "tritt",
+        "zeigt",
+        "deutlich",
+        "zentral",
+        "dein",
+        "deine",
+        "deiner",
+        "deinem",
     }
     return [w for w in words if w not in stopwords and len(w) > 2]
 
@@ -188,31 +316,36 @@ def too_similar(user_text: str, reply: str) -> bool:
 
     user_set = set(user_words)
     reply_set = set(reply_words)
-
     overlap_ratio = len(user_set & reply_set) / max(len(reply_set), 1)
 
     user_bigrams = set(zip(user_words, user_words[1:]))
     reply_bigrams = set(zip(reply_words, reply_words[1:]))
     shared_bigrams = user_bigrams & reply_bigrams
 
-    if overlap_ratio > 0.6:
-        return True
-
-    if len(shared_bigrams) >= 2:
-        return True
-
-    return False
+    return overlap_ratio > 0.6 or len(shared_bigrams) >= 2
 
 
 def fallback_reply(cond: str) -> str:
     if cond == "high":
         return (
-            "Für dich steht gerade im Vordergrund, dass dieses Thema im Moment viel Raum einnimmt. "
-            "Was ist daran aktuell besonders präsent?"
+            "Du beschreibst, dass dieses Thema im Moment viel Raum einnimmt und dich belastet. "
+            "Was daran ist gerade besonders präsent?"
         )
     return (
-        "Im Vordergrund steht hier, dass dieses Thema derzeit mit deutlicher Belastung verbunden ist. "
-        "Was steht daran aktuell besonders im Vordergrund?"
+        "Deutlich wird hier, dass dieses Thema derzeit viel Raum einnimmt und mit Belastung verbunden ist. "
+        "Was ist daran aktuell besonders wichtig?"
+    )
+
+
+def fallback_closing_reply(cond: str) -> str:
+    if cond == "high":
+        return (
+            "Du beschreibst, dass dieses Thema im Moment weiterhin viel Raum einnimmt und dich belastet. "
+            "Damit endet die kurze Reflexion zu deinem studienbezogenen Thema."
+        )
+    return (
+        "Deutlich wird hier, dass dieses Thema derzeit weiterhin viel Raum einnimmt und mit Belastung verbunden ist. "
+        "Damit endet die kurze Reflexion zu diesem studienbezogenen Thema."
     )
 
 
@@ -220,10 +353,11 @@ def build_safety_message() -> str:
     return (
         "Deine Eingabe enthält Hinweise auf eine mögliche starke psychische Belastung oder Gedanken an "
         "Selbstgefährdung. Dieser Chat kann in solchen Situationen nicht weitergeführt werden.\n\n"
-        "Bitte wende dich an eine vertraute Person oder professionelle Hilfe.\n\n"
-        "Telefonseelsorge (kostenlos, anonym):\n"
+        "Bitte wende dich an eine vertraute Person oder an professionelle Hilfe.\n\n"
+        "Telefonseelsorge (kostenlos und anonym):\n"
         "0800 111 0 111\n"
-        "0800 111 0 222\n\n"
+        "0800 111 0 222\n"
+        "116 123\n\n"
         "Bei akuter Gefahr: 112"
     )
 
@@ -231,27 +365,16 @@ def build_safety_message() -> str:
 def check_safety_keywords(text: str) -> bool:
     lower = text.lower().strip()
 
-    for kw in SAFETY_KEYWORDS:
-        if kw in lower:
-            return True
-
-    if "nicht mehr" in lower and ("leben" in lower or "da sein" in lower or "existieren" in lower):
+    if any(kw in lower for kw in SAFETY_KEYWORDS):
         return True
-
-    if ("mir" in lower or "mich" in lower) and "antun" in lower:
+    if "nicht mehr" in lower and any(x in lower for x in ["leben", "da sein", "existieren"]):
         return True
-
+    if any(x in lower for x in ["mir", "mich"]) and "antun" in lower:
+        return True
     if "umbringen" in lower:
         return True
 
     return False
-
-
-def check_safety_global(messages: list[dict]) -> bool:
-    combined_user_text = " ".join(
-        msg["content"].lower() for msg in messages if msg["role"] == "user"
-    )
-    return check_safety_keywords(combined_user_text)
 
 
 def llm_safety_check(text: str, session_id: str) -> bool:
@@ -268,7 +391,9 @@ Regeln:
   Suizidgedanken oder den Wunsch, nicht mehr leben / nicht mehr da sein zu wollen.
 - NEIN = solche Hinweise sind nicht erkennbar.
 - Antworte niemals mit Erklärungen, nur mit JA oder NEIN.
-"""
+- Sprachliche Übertreibungen zu Studium, Prüfungen oder Stress ohne echte Selbstgefährdung
+  sollen nicht als JA markiert werden.
+""".strip()
 
     try:
         raw = call_llm(
@@ -279,8 +404,7 @@ Regeln:
         )
         if not raw:
             return False
-        answer = raw.strip().upper()
-        return answer.startswith("JA")
+        return raw.strip().upper().startswith("JA")
     except Exception as exc:
         log_error("safety_llm_error", repr(exc), session_id=session_id)
         return False
@@ -290,23 +414,24 @@ def check_safety_hybrid(user_text: str, messages: list[dict], session_id: str) -
     if check_safety_keywords(user_text):
         return True
 
-    if check_safety_global(messages):
-        return True
-
-    if llm_safety_check(user_text, session_id=session_id):
-        return True
-
     combined_recent = " ".join(
         msg["content"] for msg in messages if msg["role"] == "user"
     )[-1200:]
 
-    if combined_recent and llm_safety_check(combined_recent, session_id=session_id):
+    if check_safety_keywords(combined_recent):
         return True
+
+    if combined_recent:
+        return llm_safety_check(combined_recent, session_id=session_id)
 
     return False
 
 
-def init_state():
+def get_condition_label(cond: str) -> str:
+    return "high-anthropomorph" if cond == "high" else "low-anthropomorph"
+
+
+def init_state() -> None:
     ensure_csv_files()
 
     pid = get_param("pid", "").strip()
@@ -325,13 +450,13 @@ def init_state():
         pid = f"test_{utc_stamp()}"
 
     return_url = get_param("return_url", "")
-    max_rounds = get_param("rounds", "5")
+    max_rounds = get_param("rounds", str(DEFAULT_MAX_ROUNDS))
     debug_mode = get_debug_mode()
 
     try:
         max_rounds_int = max(1, min(int(max_rounds), 10))
     except ValueError:
-        max_rounds_int = 5
+        max_rounds_int = DEFAULT_MAX_ROUNDS
 
     defaults = {
         "phase": "intro",
@@ -350,12 +475,12 @@ def init_state():
         "safety_triggered": False,
     }
 
-    for k, v in defaults.items():
-        if k not in st.session_state:
-            st.session_state[k] = v
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
 
 
-def log_message(role: str, text: str):
+def log_message(role: str, text: str) -> None:
     with open(LOG_FILE, "a", newline="", encoding="utf-8") as f:
         csv.writer(f).writerow(
             [
@@ -370,7 +495,7 @@ def log_message(role: str, text: str):
         )
 
 
-def write_summary_once():
+def write_summary_once() -> None:
     if st.session_state.session_end:
         return
 
@@ -404,181 +529,155 @@ Deine Aufgabe ist es, Selbstreflexion durch kurze, strukturierende Spiegelung zu
 
 Allgemeine Regeln:
 - Du antwortest auf Deutsch.
-- Deine Antwort ist ein einziger Fließtextabschnitt ohne Bulletpoints.
-- Deine Antwort enthält genau ein Fragezeichen.
-- Die Frage steht am Ende.
-- Die Frage beginnt nur mit: "Was", "Wie", "Woran", "Inwiefern" oder "Welche".
+- Du antwortest als ein einziger Fließtextabschnitt ohne Bulletpoints.
+- In den regulären Runden enthält deine Antwort genau eine offene Frage am Ende.
+- Diese Frage beginnt nur mit: Was, Wie, Woran, Inwiefern oder Welche.
 - Deine Antwort umfasst insgesamt 12 bis 55 Wörter.
 - Du gibst keine Ratschläge, Empfehlungen oder Handlungsanweisungen.
 - Du vermeidest Imperative.
 - Du stellst keine Warum-Fragen.
 - Du stellst keine Zukunftsfragen.
 - Du stellst keine suggestiven oder diagnostischen Fragen.
-- Du verwendest keine Formulierungen wie "ich fühle", "ich bin für dich da", "danke für dein Vertrauen", "es tut mir leid", "ich verstehe dich" oder "ich fühle mit dir".
-- Variiere Einstiegsformulierungen leicht, ohne neue Inhalte hinzuzufügen.
-- Beginne Antworten nicht wiederholt mit exakt denselben Satzanfängen.
+- Du verwendest keine Beziehungssprache, keine Empathieformeln und keine therapeutische Sprache.
+- Du formulierst knapp, konsistent und kontrolliert.
+
+Struktur jeder regulären Antwort:
+1. eine kurze, verdichtete Spiegelung von 1 bis 2 zentralen Aspekten,
+2. genau eine offene Frage am Ende.
 
 Spiegelungsregeln:
 - Du wiederholst nicht den Wortlaut der Person.
-- Du übernimmst keine vollständigen Satzstrukturen oder längere Formulierungen aus dem Text.
+- Du übernimmst keine vollständigen Satzstrukturen aus dem Nutzereingabetext.
 - Du formulierst den Inhalt in eigenen Worten neu.
-- Du benennst maximal 1–2 zentrale Aspekte.
-- Du lässt Beispiele, Wiederholungen und Nebenaspekte weg.
-- Du priorisierst, was im Text am stärksten im Vordergrund steht.
-- Du verdichtest den Inhalt und machst sichtbar, was im Text im Vordergrund steht.
-- Wenn mehrere Aspekte genannt werden, kannst du ihre Beziehung knapp sichtbar machen, z. B. als Gleichzeitigkeit, Zusammenhang oder Spannung.
-- Verdichtung bedeutet hier: mehrere genannte Aspekte knapp zu ordnen oder auf einen benannten Schwerpunkt zu fokussieren, ohne neue Bedeutungen hinzuzufügen.
-- Du verwendest nur Inhalte, die die Person selbst genannt hat.
-- Du fügst keine neuen Emotionen, Motive oder Ursachen hinzu.
+- Du benennst maximal 1 bis 2 zentrale Aspekte.
+- Du lässt Beispiele, Nebenaspekte und Wiederholungen weg.
+- Du priorisierst, was im Text am stärksten erkennbar ist.
+- Du darfst markante Selbstformulierungen der Person punktuell beibehalten, wenn sie inhaltlich zentral sind.
+- Du fügst keine neuen Emotionen, Motive, Ursachen oder Deutungen hinzu.
 - Du interpretierst nicht und stellst keine Diagnosen.
-- Du übersetzt die Aussage der Person nicht in psychologische Kategorien.
-- Wenn die Person markante eigene Begriffe, Metaphern oder Selbstbeschreibungen verwendet, dürfen diese wörtlich übernommen werden.
-- Solche Begriffe werden nicht durch fachlichere, neutralere oder emotional gefärbte Alternativen ersetzt.
-- Du vermeidest semantische Umdeutungen einzelner Schlüsselbegriffe.
-- Du benennst keine verdeckten Muster, Kreisläufe, Dynamiken oder inneren Mechanismen, wenn diese nicht ausdrücklich von der Person selbst genannt wurden.
+- Du übersetzt Aussagen nicht in psychologische Kategorien.
 - Du leitest keine Konsequenzen, Empfehlungen oder Haltungen aus dem Gesagten ab.
-- Die Spiegelung ist kurz, präzise und strukturiert.
 
-Wichtige Bedingungsregel:
-- Die inhaltliche Qualität, Tiefe und Struktur der Antwort bleibt in beiden Bedingungen gleich.
-- Variiert wird ausschließlich die sprachliche Perspektive (inhaltlich orientiert vs. leicht subjektbezogen).
-- Es dürfen keine zusätzlichen Inhalte, Bewertungen oder impliziten Bedeutungen zwischen den Bedingungen entstehen.
-- Die Frage bleibt in beiden Bedingungen gleich offen und gleich wenig lenkend.
-- Die Frage soll den bereits benannten Schwerpunkt weiter öffnen, nicht das Thema wechseln.
+Bedingungsregel:
+- Die inhaltliche Qualität, Tiefe, Gesprächsstruktur und Offenheit bleiben in beiden Bedingungen gleich.
+- Variiert wird ausschließlich der sprachliche Stil.
+- Der Stilunterschied darf keine zusätzlichen Inhalte oder Bewertungen erzeugen.
 
-Antworte immer mit:
-1. einer kurzen Spiegelung
-2. genau einer offenen Frage am Ende
-
-Die Sitzung umfasst ungefähr {max_rounds} Nutzereingaben.
-"""
+Gesprächsrahmen:
+- Die Sitzung umfasst ungefähr {max_rounds} Nutzereingaben.
+- Das Thema ist studienbezogen und sensibel, daher ist ein kontrollierter, passender Stil besonders wichtig.
+""".strip()
 
     low_style = """
 Stil der low-Anthropomorphismus-Bedingung:
 - formuliere sachlich, nüchtern und eher inhaltsbezogen
-- beziehe dich stärker auf den dargestellten Inhalt oder die Beschreibung als auf die Person
-- verwende eher distanzierte, strukturierende Formulierungen
-- vermeide personenbezogene oder zwischenmenschlich wirkende sprachliche Nähe
-- klinge klar und verständlich, aber nicht sozial zugewandt
+- beziehe dich stärker auf den dargestellten Inhalt als auf die Person
+- verwende distanzierte, strukturierende Formulierungen
+- vermeide soziale Nähe, emotionale Validierung und personenzentrierte Wärme
+- klinge klar, präzise und eher technisch-neutral
+- bevorzuge eher nominale und beschreibende Formulierungen
 
-Bevorzugte Formulierungsarten:
-- "Im Vordergrund steht hier ..."
-- "Es wird deutlich, dass ..."
-- "In der Beschreibung zeigt sich ..."
-- "Es tritt hervor, dass ..."
+Bevorzugte Formulierungen:
+- "Deutlich wird hier, dass ..."
+- "Zentral ist hier, dass ..."
+- "In der Schilderung zeigt sich, dass ..."
+- "Erkennbar wird, dass ..."
 - "Aus der Beschreibung geht hervor, dass ..."
-- "Die Schilderung macht deutlich, dass ..."
 
 Kalibrierungsbeispiele:
-
 Nutzertext: "Ich komme mit meiner Masterarbeit nicht voran und denke ständig daran, wie viel noch fehlt."
-Antwort: "Im Vordergrund steht hier, dass die Masterarbeit derzeit mit anhaltendem Druck verbunden ist. Was wirkt daran im Moment besonders belastend?"
+Antwort: "Deutlich wird hier, dass die Masterarbeit derzeit viel Raum einnimmt und mit anhaltendem Druck verbunden ist. Was ist daran aktuell besonders wichtig?"
 
 Nutzertext: "Ich verliere langsam den Überblick und weiß nicht, wo ich anfangen soll."
-Antwort: "In der Beschreibung zeigt sich, dass mehrere Aspekte mit fehlender Übersicht und Struktur verbunden sind. Was steht daran aktuell besonders im Vordergrund?"
-"""
+Antwort: "In der Schilderung zeigt sich, dass mehrere Aspekte mit fehlender Übersicht und Struktur zusammenhängen. Was ist daran aktuell besonders wichtig?"
+""".strip()
 
     high_style = """
 Stil der high-Anthropomorphismus-Bedingung:
-- formuliere leicht subjektbezogen aus der Perspektive der Person
-- die sprachliche Nähe entsteht ausschließlich durch Perspektivbezug, nicht durch Empathie
-- bleibe sachlich, klar und nicht-menschlich
-- vermeide jede Form von emotionaler Validierung, Mitgefühl oder Beziehungssprache
-- interpretiere nicht und füge keine neuen Inhalte hinzu
-- verwende keine psychologischen Fachbegriffe oder Diagnosen
-- die Antwort darf sich sprachlich näher an der Person anfühlen, aber nicht unterstützend oder tröstend wirken
-- nutze Formulierungen wie "für dich" oder "in deinem Erleben" zurückhaltend und nicht in jedem Satz
+- formuliere natürlich, leicht personenbezogen und sprachlich zugänglicher
+- bleibe kontrolliert, sachlich und nicht-therapeutisch
+- nutze moderat die Perspektive der Person
+- vermeide Mitgefühl, Trost, starke Wärme und jede menschenähnliche Rollensimulation
+- der Stil soll human-like formal wirken, nicht locker oder flapsig
+- bevorzuge eher verbale, direkte und etwas alltagsnähere Formulierungen
 
-Bevorzugte Formulierungsarten:
-- "Für dich steht gerade im Vordergrund, dass ..."
-- "Für dich scheint sich im Moment vieles um ... zu bündeln"
-- "In deinem Erleben wird deutlich, dass ..."
-- "Gerade wirkt für dich besonders präsent, dass ..."
-- "In dem, wie du es beschreibst, zeigt sich für dich, dass ..."
-- "Für dich tritt dabei besonders hervor, dass ..."
-
-Fragegestaltung:
-- die Frage bleibt offen und nicht lenkend
-- sie darf leicht subjektbezogen formuliert sein, aber ohne zusätzliche Interpretation
-- sie darf keine emotionale Bewertung enthalten
-
-Beispiele für Fragen:
-- "Was steht dabei für dich im Moment besonders im Vordergrund?"
-- "Was wirkt darin für dich aktuell am stärksten?"
-- "Woran zeigt sich für dich dabei besonders, was wichtig ist?"
+Bevorzugte Formulierungen:
+- "Du beschreibst, dass ..."
+- "So wie du es schilderst, wird deutlich, dass ..."
+- "Bei dir zeigt sich im Moment, dass ..."
+- "Gerade wird sichtbar, dass ..."
+- "Im Moment wirkt besonders präsent, dass ..."
 
 Kalibrierungsbeispiele:
-
 Nutzertext: "Ich komme mit meiner Masterarbeit nicht voran und denke ständig daran, wie viel noch fehlt."
-Antwort: "Für dich steht gerade im Vordergrund, dass die Masterarbeit im Moment viel Raum einnimmt und ständig präsent ist. Was wirkt darin für dich aktuell am stärksten?"
+Antwort: "Du beschreibst, dass die Masterarbeit im Moment viel Raum einnimmt und dich belastet. Was daran ist gerade besonders präsent?"
 
 Nutzertext: "Ich verliere langsam den Überblick und weiß nicht, wo ich anfangen soll."
-Antwort: "In deinem Erleben wird deutlich, dass sich mehrere Aspekte rund um fehlende Übersicht und Orientierung bündeln. Was steht dabei für dich im Moment besonders im Vordergrund?"
-"""
+Antwort: "So wie du es schilderst, wird deutlich, dass sich gerade vieles unübersichtlich anfühlt. Woran merkst du im Moment besonders, dass dir Struktur fehlt?"
+""".strip()
 
-    if cond == "high":
-        return base + "\n" + high_style
-    return base + "\n" + low_style
+    return base + "\n\n" + (high_style if cond == "high" else low_style)
 
 
 def build_closing_prompt(cond: str) -> str:
     base = """
 Du bist ein KI-basiertes Reflexionssystem im Rahmen einer psychologischen Studie.
 
-Du bist kein Mensch, empfindest keine Emotionen und bildest keine Beziehung im menschlichen Sinn.
-Du bist keine Therapie, kein Coaching, keine Diagnostik und gibst keine Ratschläge, Lösungen oder Ziele vor.
-Du erklärst keine psychologischen Modelle, verwendest keine Fachbegriffe und stellst keine Diagnosen.
+Deine Aufgabe in dieser letzten Nachricht ist es, die bisherige Reflexion knapp und transparent abzuschließen.
 
-Deine Aufgabe in dieser letzten Nachricht ist es, die bisherige Reflexion in einem sehr kurzen, neutralen Abschluss zu bündeln.
+Regeln:
+- Antworte auf Deutsch.
+- Formuliere einen einzigen kurzen Fließtextabschnitt.
+- Verwende kein Fragezeichen.
+- Beginne mit einer kurzen Spiegelung von 1 bis 2 bereits genannten zentralen Aspekten.
+- Verwende ausschließlich Inhalte, die die Person selbst benannt hat.
+- Füge keine neuen Emotionen, Motive, Ursachen oder Bewertungen hinzu.
+- Interpretiere nicht.
+- Gib keine Ratschläge, Empfehlungen oder Zukunftsaussagen.
+- Verwende keine therapeutische oder diagnostische Sprache.
+- Beende die Antwort mit einem neutralen Abschlussmarker.
 
-Regeln für diese Abschlussnachricht:
-- Du antwortest auf Deutsch.
-- Du formulierst einen einzigen, kurzen Fließtextabschnitt ohne Bulletpoints.
-- Deine Antwort enthält kein Fragezeichen.
-- Du fasst nur 1–2 zentrale, bereits genannte Schwerpunkte der Reflexion zusammen.
-- Du verwendest ausschließlich Inhalte, die die Person selbst benannt hat.
-- Du fügst keine neuen Emotionen, Motive, Ursachen oder Bewertungen hinzu.
-- Du interpretierst nicht.
-- Du gibst keine Ratschläge, Empfehlungen oder Handlungsanweisungen.
-- Du verwendest keine psychologischen Fachbegriffe, keine Diagnosen und keine Zukunftsaussagen.
-- Wenn die Person markante eigene Begriffe oder Metaphern verwendet hat, dürfen diese beibehalten werden.
-- Der Abschluss soll ruhig, knapp und ordnend wirken und das Ende der Reflexion markieren.
-"""
+Struktur:
+1. kurze Spiegelung von 1 bis 2 zentralen Aspekten,
+2. neutraler Abschluss der begrenzten Reflexion.
+
+Geeignete Abschlussmarker:
+- "Damit endet die kurze Reflexion zu diesem studienbezogenen Thema."
+- "Damit endet die kurze Reflexion zu deinem studienbezogenen Thema."
+""".strip()
 
     low_style = """
 Stil der low-Anthropomorphismus-Bedingung:
-- formuliere sachlich, nüchtern und eher inhaltsbezogen
-- beziehe dich stärker auf den dargestellten Inhalt oder die Beschreibung als auf die Person
-- verwende eher distanzierte, strukturierende Formulierungen
+- sachlich, nüchtern und eher inhaltsbezogen
+- distanzierte, strukturierende Formulierungen
 
-Bevorzugte Formulierungsarten für den Abschluss:
-- "Abschließend wird sichtbar, dass ..."
-- "In dieser kurzen Reflexion trat besonders hervor, dass ..."
-- "Zusammenfassend zeigt sich in der Beschreibung, dass ..."
-"""
+Bevorzugte Formulierungen:
+- "Deutlich wird hier, dass ..."
+- "In der Schilderung zeigt sich, dass ..."
+- "Erkennbar bleibt, dass ..."
+""".strip()
 
     high_style = """
 Stil der high-Anthropomorphismus-Bedingung:
-- formuliere leicht subjektbezogen, aber nicht empathisch
-- beziehe dich stärker auf die Perspektive der Person
-- bleibe sachlich und klar nicht-menschlich
+- leicht personenbezogen, aber nicht empathisch
+- sachlich, klar und kontrolliert
+- human-like formal, nicht locker
 
-Bevorzugte Formulierungsarten für den Abschluss:
-- "Abschließend wird in deiner Schilderung sichtbar, dass ..."
-- "In dieser kurzen Reflexion trat für dich besonders hervor, dass ..."
-- "Zusammenfassend zeigt sich für dich, dass ..."
-"""
+Bevorzugte Formulierungen:
+- "Du beschreibst, dass ..."
+- "So wie du es schilderst, wird deutlich, dass ..."
+- "Bei dir zeigt sich im Moment, dass ..."
+""".strip()
 
-    if cond == "high":
-        return base + "\n" + high_style
-    return base + "\n" + low_style
+    return base + "\n\n" + (high_style if cond == "high" else low_style)
 
 
 def generate_llm_reply(user_text: str, cond: str, topic: str, turn: int, max_rounds: int) -> str:
     system_prompt = build_system_prompt(cond=cond, max_rounds=max_rounds)
 
     context = [
-        f"Das Thema der Person lautet: {topic}",
+        f"Thema der Person: {topic}",
+        f"Aktuelle Runde: {turn} von ungefähr {max_rounds}",
         f"Letzte Eingabe der Person: {user_text}",
     ]
 
@@ -590,11 +689,11 @@ def generate_llm_reply(user_text: str, cond: str, topic: str, turn: int, max_rou
     )
 
     if raw_reply and validate_response(raw_reply) and not too_similar(user_text, raw_reply):
-        return raw_reply
+        return raw_reply.strip()
 
     retry_context = context + [
-        "Formuliere die Spiegelung diesmal deutlich stärker verdichtend und strukturiert. "
-        "Vermeide Wiederholungen des Wortlauts der Person, außer bei einzelnen zentralen Schlüsselbegriffen."
+        "Formuliere jetzt knapper, stärker verdichtend und mit klarerem Stilunterschied der zugewiesenen Bedingung. "
+        "Vermeide Wortlautübernahmen aus dem Nutzereingabetext."
     ]
 
     retry_reply = call_llm(
@@ -605,7 +704,7 @@ def generate_llm_reply(user_text: str, cond: str, topic: str, turn: int, max_rou
     )
 
     if retry_reply and validate_response(retry_reply) and not too_similar(user_text, retry_reply):
-        return retry_reply
+        return retry_reply.strip()
 
     log_error(
         "fallback_used",
@@ -618,15 +717,15 @@ def generate_llm_reply(user_text: str, cond: str, topic: str, turn: int, max_rou
 def generate_closing_reply(cond: str, topic: str, recent_user_texts: list[str]) -> str:
     system_prompt = build_closing_prompt(cond=cond)
 
-    joined_recent = "\n".join(
-        [f"- {txt}" for txt in recent_user_texts if txt.strip()]
-    )
+    joined_recent = "\n".join(f"- {txt}" for txt in recent_user_texts if txt.strip())
 
     context = [
-        f"Das Thema der Person lautet: {topic}",
+        f"Thema der Person: {topic}",
         "Die folgenden letzten Nutzereingaben sollen für den Abschluss berücksichtigt werden:",
         joined_recent,
-        "Dies ist die letzte Nachricht der Reflexion. Fasse die zuletzt sichtbaren Schwerpunkte in 1–2 kurzen Sätzen zusammen, ohne neue Inhalte hinzuzufügen.",
+        "Dies ist die letzte Nachricht. Formuliere zuerst eine kurze Spiegelung von 1 bis 2 zentralen Aspekten "
+        "und beende danach die begrenzte Reflexion transparent. Kein Fragezeichen. Keine neuen Inhalte. "
+        "Kein Ratschlag. Keine Interpretation.",
     ]
 
     raw_reply = call_llm(
@@ -637,19 +736,58 @@ def generate_closing_reply(cond: str, topic: str, recent_user_texts: list[str]) 
     )
 
     if raw_reply and validate_closing_response(raw_reply):
-        return raw_reply
+        return raw_reply.strip()
 
-    log_error("closing_fallback_used", f"raw_reply={repr(raw_reply)}", session_id=st.session_state.session_id)
+    retry_context = context + [
+        "Formuliere jetzt noch knapper und neutraler. Erste Satzhälfte = Spiegelung. Letzte Satzhälfte = klarer Abschlussmarker."
+    ]
 
-    if cond == "high":
-        return "Abschließend wird in deiner Schilderung sichtbar, dass dieses studienbezogene Thema derzeit viel Raum einnimmt und mehrere belastende Aspekte zusammenkommen."
-    return "Abschließend wird sichtbar, dass dieses studienbezogene Thema derzeit mit mehreren belastenden Aspekten verbunden ist."
+    retry_reply = call_llm(
+        system_prompt=system_prompt,
+        messages=retry_context,
+        cond=cond,
+        session_id=st.session_state.session_id,
+    )
+
+    if retry_reply and validate_closing_response(retry_reply):
+        return retry_reply.strip()
+
+    log_error(
+        "closing_fallback_used",
+        f"raw_reply={repr(raw_reply)} retry_reply={repr(retry_reply if 'retry_reply' in locals() else None)}",
+        session_id=st.session_state.session_id,
+    )
+    return fallback_closing_reply(cond)
 
 
-def get_condition_label(cond: str) -> str:
-    if cond == "high":
-        return "high-anthropomorph"
-    return "low-anthropomorph"
+def render_return_button(url: str) -> None:
+    safe_url = quote(url, safe=":/?&=%#")
+    label = html.escape("Zurück zum Fragebogen")
+    st.markdown(
+        f'<a href="{safe_url}" target="_self" '
+        'style="text-decoration:none;color:#111111;display:inline-block;">'
+        '<div style="display:inline-block;padding:0.7rem 1rem;'
+        'background:#e9dfcf;color:#111111;border-radius:0.6rem;'
+        f'font-weight:600;border:1px solid #cbbda8;">{label}</div></a>',
+        unsafe_allow_html=True,
+    )
+
+
+def reset_test_session() -> None:
+    for key in [
+        "phase",
+        "messages",
+        "turn",
+        "session_id",
+        "session_start",
+        "session_end",
+        "chat_completed",
+        "topic",
+        "safety_triggered",
+    ]:
+        if key in st.session_state:
+            del st.session_state[key]
+    st.rerun()
 
 
 init_state()
@@ -682,29 +820,30 @@ if st.session_state.debug_mode:
         st.write({"session_id": st.session_state.session_id})
 
 if st.session_state.phase == "intro":
-    st.markdown(
-        """
-Willkommen zur KI-Reflexionssession.
-
-Im Rahmen dieser kurzen Session reflektierst du ein aktuelles studienbezogenes Thema.
-"""
-    )
+    st.markdown(INTRO_TEXT)
 
     topic = st.text_area(
-        "Womit möchtest du dich in dieser kurzen Reflexion zu einem studienbezogenen Thema beschäftigen?",
+        "Mit welchem studienbezogenen Thema möchtest du dich in dieser kurzen Reflexion beschäftigen?",
         value=st.session_state.topic,
-        placeholder="Zum Beispiel: Prüfungsdruck, Stress mit der Masterarbeit, Zukunftsunsicherheit im Studium …",
-        height=120,
+        placeholder=(
+            "Zum Beispiel: Unsicherheit im Studienverlauf, Stress im Studium, Schwierigkeiten mit Motivation, "
+            "Druck bei der Masterarbeit oder Probleme, den Überblick zu behalten."
+        ),
+        height=220,
     )
     st.session_state.topic = topic
 
     if st.button("Reflexion starten", type="primary"):
-        if not topic.strip():
-            st.warning("Bitte gib zuerst ein Thema ein, bevor du die Reflexion startest.")
+        valid, topic_or_msg = validate_topic(topic)
+        if not valid:
+            st.warning(topic_or_msg)
         else:
+            st.session_state.topic = topic_or_msg
             intro_msg = (
-                "Danke. Wir beginnen mit einer kurzen Reflexion zu deinem studienbezogenen Thema. "
-                "Beschreibe zunächst, was dich daran aktuell besonders beschäftigt."
+                "Die Reflexion beginnt jetzt zu diesem studienbezogenen Thema. "
+                "Beschreibe dein Thema möglichst so, dass der Chat nachvollziehen kann, worum es geht. "
+                "Hilfreich kann sein, kurz zu schildern, was dich aktuell beschäftigt, welche Gedanken dabei auftauchen "
+                "und warum das Thema im Moment relevant ist."
             )
             st.session_state.messages.append({"role": "assistant", "content": intro_msg})
             log_message("assistant", intro_msg)
@@ -719,9 +858,16 @@ elif st.session_state.phase == "chat":
         with st.chat_message(msg["role"]):
             st.write(msg["content"])
 
-    user_input = st.chat_input("Schreibe hier deine Antwort …")
+    user_input = st.chat_input("Schreibe hier deine Antwort in ein bis zwei Sätzen …")
 
     if user_input:
+        valid, input_or_msg = validate_chat_input(user_input)
+        if not valid:
+            if input_or_msg:
+                st.warning(input_or_msg)
+            st.rerun()
+
+        user_input = input_or_msg
         st.session_state.messages.append({"role": "user", "content": user_input})
         log_message("user", user_input)
 
@@ -740,6 +886,25 @@ elif st.session_state.phase == "chat":
             st.session_state.phase = "finished"
             st.rerun()
 
+        if st.session_state.turn >= st.session_state.max_rounds - 1:
+            recent_user_texts = [
+                msg["content"] for msg in st.session_state.messages if msg["role"] == "user"
+            ][-3:]
+
+            closing_reply = generate_closing_reply(
+                cond=st.session_state.cond,
+                topic=st.session_state.topic,
+                recent_user_texts=recent_user_texts,
+            )
+
+            st.session_state.messages.append({"role": "assistant", "content": closing_reply})
+            log_message("assistant", closing_reply)
+
+            st.session_state.turn += 1
+            st.session_state.chat_completed = True
+            st.session_state.phase = "finished"
+            st.rerun()
+
         reply = generate_llm_reply(
             user_text=user_input,
             cond=st.session_state.cond,
@@ -752,31 +917,11 @@ elif st.session_state.phase == "chat":
         log_message("assistant", reply)
 
         st.session_state.turn += 1
-
-        if st.session_state.turn >= st.session_state.max_rounds:
-            recent_user_texts = [
-                msg["content"]
-                for msg in st.session_state.messages
-                if msg["role"] == "user"
-            ][-3:]
-
-            closing_reply = generate_closing_reply(
-                cond=st.session_state.cond,
-                topic=st.session_state.topic,
-                recent_user_texts=recent_user_texts,
-            )
-
-            st.session_state.messages.append({"role": "assistant", "content": closing_reply})
-            log_message("assistant", closing_reply)
-
-            st.session_state.chat_completed = True
-            st.session_state.phase = "finished"
-
         st.rerun()
 
 elif st.session_state.phase == "finished":
     write_summary_once()
-    st.success("Der Chatteil ist beendet.")
+    st.success("Der Chatteil ist beendet. Bitte kehre zum Fragebogen zurück.")
 
     if st.session_state.safety_triggered:
         st.warning(
@@ -786,47 +931,22 @@ elif st.session_state.phase == "finished":
 
         st.markdown(
             """
-Bitte wenden Sie sich an eine vertraute Person oder an professionelle Hilfe.
+Bitte wende dich an eine vertraute Person oder an professionelle Hilfe.
 
 **Telefonseelsorge (kostenlos und anonym):**  
 0800 111 0 111  
 0800 111 0 222  
+116 123  
 
 **Bei akuter Gefahr:**  
 112
 """
         )
-
-        st.info(
-            "Sie müssen den Fragebogen nicht weiter ausfüllen. "
-            "Sie können dieses Browserfenster jetzt schließen."
-        )
-
     else:
-        st.write(
-            "Vielen Dank für deine Teilnahme an diesem Chatteil. "
-            "Im nächsten Schritt geht es im Fragebogen weiter mit einigen Fragen zu deiner Erfahrung."
-        )
-        st.write(
-            "Bitte kehre dazu zum Fragebogen-Tab zurück. "
-            "Falls unten ein Button angezeigt wird, kannst du auch darauf klicken."
-        )
-
         if st.session_state.return_url:
-            safe_url = quote(st.session_state.return_url, safe=":/?&=%#")
-            st.markdown(
-                f'<a href="{safe_url}" target="_self" '
-                'style="text-decoration:none;color:#111111;display:inline-block;">'
-                '<div style="display:inline-block;padding:0.7rem 1rem;'
-                'background:#e9dfcf;color:#111111;border-radius:0.6rem;'
-                'font-weight:600;border:1px solid #cbbda8;">Zurück zum Fragebogen</div></a>',
-                unsafe_allow_html=True,
-            )
+            render_return_button(st.session_state.return_url)
         else:
-            st.info(
-                "Es wurde kein automatischer Rücksprunglink übermittelt. "
-                "Bitte wechsle manuell zurück zum Fragebogen-Tab in deinem Browser und fahre dort fort."
-            )
+            st.info("Bitte wechsle zurück zum Fragebogen-Tab in deinem Browser.")
 
     if st.session_state.debug_mode:
         st.markdown("### Sitzungsdaten (lokale Vorschau)")
@@ -836,17 +956,4 @@ Bitte wenden Sie sich an eine vertraute Person oder an professionelle Hilfe.
             st.dataframe(session_df, use_container_width=True)
 
         if st.button("Neue Testsitzung starten"):
-            for key in [
-                "phase",
-                "messages",
-                "turn",
-                "session_id",
-                "session_start",
-                "session_end",
-                "chat_completed",
-                "topic",
-                "safety_triggered",
-            ]:
-                if key in st.session_state:
-                    del st.session_state[key]
-            st.rerun()
+            reset_test_session()
