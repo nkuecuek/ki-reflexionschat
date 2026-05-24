@@ -11,7 +11,12 @@ import pandas as pd
 import streamlit as st
 from openai import OpenAI
 
-st.set_page_config(page_title="KI-Reflexionschat", page_icon="💬", layout="centered")
+st.set_page_config(
+    page_title="KI-Reflexionschat",
+    page_icon="💬",
+    layout="centered",
+    initial_sidebar_state="expanded",
+)
 
 DATA_DIR = Path("data")
 DATA_DIR.mkdir(exist_ok=True)
@@ -57,7 +62,15 @@ QUESTION_START_WORDS = ["Was", "Wie", "Woran", "Inwiefern", "Welche"]
 
 @st.cache_resource
 def get_openai_client() -> OpenAI:
-    return OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+    try:
+        api_key = st.secrets["OPENAI_API_KEY"]
+    except Exception as e:
+        raise RuntimeError(f"OPENAI_API_KEY nicht in st.secrets gefunden: {e}")
+
+    if not api_key or not str(api_key).strip():
+        raise RuntimeError("OPENAI_API_KEY ist leer.")
+
+    return OpenAI(api_key=api_key)
 
 
 def now_iso() -> str:
@@ -240,6 +253,9 @@ def init_state():
         "safety_triggered": False,
         "closing_logged": False,
         "user_messages_count": 0,
+        "last_llm_error": "",
+        "last_llm_raw_reply": "",
+        "last_llm_status": "",
     }
 
     for k, v in defaults.items():
@@ -430,13 +446,21 @@ def call_llm(system_prompt: str, topic: str, turn: int, max_rounds: int, user_te
         max_tokens=140,
     )
 
-    return (response.choices[0].message.content or "").strip()
+    content = response.choices[0].message.content
+    if content is None:
+        raise RuntimeError("OpenAI-Antwort enthält keinen Textinhalt.")
+
+    return content.strip()
 
 
 def generate_llm_reply(user_text: str, cond: str, topic: str, turn: int, max_rounds: int) -> str:
     system_prompt = build_system_prompt(cond=cond, max_rounds=max_rounds)
 
-    for _ in range(MAX_RETRIES):
+    st.session_state.last_llm_error = ""
+    st.session_state.last_llm_raw_reply = ""
+    st.session_state.last_llm_status = ""
+
+    for attempt in range(1, MAX_RETRIES + 1):
         try:
             raw_reply = call_llm(
                 system_prompt=system_prompt,
@@ -445,11 +469,25 @@ def generate_llm_reply(user_text: str, cond: str, topic: str, turn: int, max_rou
                 max_rounds=max_rounds,
                 user_text=user_text,
             )
+
+            st.session_state.last_llm_raw_reply = raw_reply
+
             if validate_response(raw_reply):
+                st.session_state.last_llm_status = f"LLM ok in Versuch {attempt}"
                 return raw_reply
-        except Exception:
+
+            st.session_state.last_llm_error = (
+                f"Validierung fehlgeschlagen in Versuch {attempt}. "
+                f"Antwort: {raw_reply}"
+            )
+            time.sleep(0.4)
+
+        except Exception as e:
+            st.session_state.last_llm_error = f"{type(e).__name__}: {e}"
+            st.session_state.last_llm_status = f"Fehler in Versuch {attempt}"
             time.sleep(0.7)
 
+    st.session_state.last_llm_status = "Fallback ausgelöst"
     return fallback_reply(cond, user_text=user_text)
 
 
@@ -459,14 +497,12 @@ def get_condition_label(cond: str) -> str:
     return "low-anthropomorph"
 
 
-init_state()
+def render_debug_sidebar():
+    if not st.session_state.debug_mode:
+        return
 
-st.title("KI-Reflexionschat")
-st.caption("Technischer Prototyp für die Masterarbeit")
-
-if st.session_state.debug_mode:
     with st.sidebar:
-        st.markdown("### Studienparameter")
+        st.markdown("### Debug")
         st.write(
             {
                 "pid": st.session_state.pid,
@@ -474,13 +510,36 @@ if st.session_state.debug_mode:
                 "raw_cond": st.session_state.raw_cond,
                 "cond_label": get_condition_label(st.session_state.cond),
                 "rounds": st.session_state.max_rounds,
+                "turn": st.session_state.turn,
+                "phase": st.session_state.phase,
+                "session_id": st.session_state.session_id,
             }
         )
-        st.markdown("### Modus")
-        st.info("Debug-/Testmodus aktiv")
-        st.markdown("### Session")
-        st.write({"session_id": st.session_state.session_id})
 
+        try:
+            api_key = st.secrets["OPENAI_API_KEY"]
+            masked = f"{str(api_key)[:7]}...{str(api_key)[-4:]}" if len(str(api_key)) >= 12 else "vorhanden"
+            st.success(f"OPENAI_API_KEY gefunden: {masked}", icon="✅")
+        except Exception as e:
+            st.error(f"OPENAI_API_KEY fehlt: {e}", icon="🚨")
+
+        if st.session_state.last_llm_status:
+            st.info(st.session_state.last_llm_status)
+
+        if st.session_state.last_llm_error:
+            st.error("Letzter LLM-Fehler", icon="🚨")
+            st.code(st.session_state.last_llm_error)
+
+        if st.session_state.last_llm_raw_reply:
+            st.write("Letzte rohe Modellantwort:")
+            st.code(st.session_state.last_llm_raw_reply)
+
+
+init_state()
+render_debug_sidebar()
+
+st.title("KI-Reflexionschat")
+st.caption("Technischer Prototyp für die Masterarbeit")
 
 if st.session_state.phase == "intro":
     st.markdown(
@@ -585,7 +644,6 @@ elif st.session_state.phase == "chat":
         st.session_state.messages.append({"role": "assistant", "content": reply})
         log_message("assistant", reply)
 
-        st.session_state.turn += 1
         st.rerun()
 
 
@@ -637,6 +695,9 @@ elif st.session_state.phase == "finished":
                 "safety_triggered",
                 "closing_logged",
                 "user_messages_count",
+                "last_llm_error",
+                "last_llm_raw_reply",
+                "last_llm_status",
             ]:
                 if key in st.session_state:
                     del st.session_state[key]
