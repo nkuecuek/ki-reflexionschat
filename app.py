@@ -5,11 +5,11 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import List, Dict
+from urllib.parse import quote
 
 import pandas as pd
 import streamlit as st
 from openai import OpenAI
-from urllib.parse import quote
 
 st.set_page_config(page_title="KI-Reflexionschat", page_icon="💬", layout="centered")
 
