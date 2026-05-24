@@ -1,12 +1,15 @@
 import csv
 import re
 import string
+import time
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import quote
+from typing import List, Dict
 
 import pandas as pd
 import streamlit as st
+from openai import OpenAI
+from urllib.parse import quote
 
 st.set_page_config(page_title="KI-Reflexionschat", page_icon="💬", layout="centered")
 
@@ -14,6 +17,10 @@ DATA_DIR = Path("data")
 DATA_DIR.mkdir(exist_ok=True)
 LOG_FILE = DATA_DIR / "chat_logs.csv"
 SUMMARY_FILE = DATA_DIR / "chat_sessions.csv"
+
+MODEL_NAME = "gpt-4o-mini"
+TEMPERATURE = 0.6
+MAX_RETRIES = 3
 
 SAFETY_KEYWORDS = [
     "suizid",
@@ -46,6 +53,11 @@ FORBIDDEN_PHRASES = [
 ]
 
 QUESTION_START_WORDS = ["Was", "Wie", "Woran", "Inwiefern", "Welche"]
+
+
+@st.cache_resource
+def get_openai_client() -> OpenAI:
+    return OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
 
 def now_iso() -> str:
@@ -178,8 +190,6 @@ def fallback_reply(cond: str, user_text: str = "") -> str:
 
 
 def check_safety(user_text: str) -> bool:
-    # Satzzeichen entfernen, um Varianten wie "ich will nicht mehr leben."
-    # zuverlässig zu erkennen
     text = (user_text or "").lower()
     text = text.translate(str.maketrans("", "", string.punctuation))
     return any(kw in text for kw in SAFETY_KEYWORDS)
@@ -388,35 +398,57 @@ Wichtig:
     return base + "\n" + low_style
 
 
-def call_llm(system_prompt: str, messages: list[str], cond: str) -> str:
-    """
-    Platzhalter-Funktion für den echten LLM-Call.
-    Für die Studie durch einen realen API-Call ersetzen.
-    """
-    if cond == "high":
-        return (
-            "Du beschreibst, dass dieses studienbezogene Thema im Moment viel Raum einnimmt und dich belastet. "
-            "Was daran ist gerade besonders präsent?"
-        )
-    return (
-        "Deutlich wird hier, dass dieses studienbezogene Thema derzeit viel Raum einnimmt und mit Belastung verbunden ist. "
-        "Was ist daran aktuell besonders wichtig?"
+def build_api_messages(system_prompt: str, topic: str, turn: int, max_rounds: int, user_text: str) -> List[Dict[str, str]]:
+    return [
+        {"role": "system", "content": system_prompt},
+        {
+            "role": "user",
+            "content": (
+                f"Studienbezogenes Hauptthema der Person: {topic}\n"
+                f"Aktuelle Rundenzahl: {turn} von {max_rounds}\n"
+                f"Letzte Eingabe der Person: {user_text}\n"
+                "Formuliere jetzt genau eine Antwort gemäß allen Regeln."
+            ),
+        },
+    ]
+
+
+def call_llm(system_prompt: str, topic: str, turn: int, max_rounds: int, user_text: str) -> str:
+    client = get_openai_client()
+    messages = build_api_messages(
+        system_prompt=system_prompt,
+        topic=topic,
+        turn=turn,
+        max_rounds=max_rounds,
+        user_text=user_text,
     )
+
+    response = client.chat.completions.create(
+        model=MODEL_NAME,
+        messages=messages,
+        temperature=TEMPERATURE,
+        max_tokens=140,
+    )
+
+    return (response.choices[0].message.content or "").strip()
 
 
 def generate_llm_reply(user_text: str, cond: str, topic: str, turn: int, max_rounds: int) -> str:
     system_prompt = build_system_prompt(cond=cond, max_rounds=max_rounds)
 
-    context = [
-        f"Studienbezogenes Hauptthema der Person: {topic}",
-        f"Aktuelle Rundenzahl: {turn} von {max_rounds}",
-        f"Letzte Eingabe der Person: {user_text}",
-        "Formuliere jetzt genau eine Antwort gemäß allen Regeln.",
-    ]
-
-    raw_reply = call_llm(system_prompt=system_prompt, messages=context, cond=cond)
-    if validate_response(raw_reply):
-        return raw_reply
+    for _ in range(MAX_RETRIES):
+        try:
+            raw_reply = call_llm(
+                system_prompt=system_prompt,
+                topic=topic,
+                turn=turn,
+                max_rounds=max_rounds,
+                user_text=user_text,
+            )
+            if validate_response(raw_reply):
+                return raw_reply
+        except Exception:
+            time.sleep(0.7)
 
     return fallback_reply(cond, user_text=user_text)
 
@@ -445,9 +477,10 @@ if st.session_state.debug_mode:
             }
         )
         st.markdown("### Modus")
-        st.info("Debug-/Testmodus aktiv (LLM-Platzhalter)")
+        st.info("Debug-/Testmodus aktiv")
         st.markdown("### Session")
         st.write({"session_id": st.session_state.session_id})
+
 
 if st.session_state.phase == "intro":
     st.markdown(
@@ -489,6 +522,7 @@ Hilfreich ist, wenn du dein Thema kurz so beschreibst, dass der Chat deine Situa
             st.session_state.phase = "chat"
             st.rerun()
 
+
 elif st.session_state.phase == "chat":
     st.subheader(f"Reflexion zum Thema: {st.session_state.topic}")
     st.write(f"Nachricht {st.session_state.turn + 1} von {st.session_state.max_rounds}")
@@ -515,7 +549,6 @@ elif st.session_state.phase == "chat":
     user_input = st.chat_input("Schreibe hier deine Antwort …")
 
     if user_input:
-        # SAFETY-BLOCK: bei Treffer direkt beenden, kein normaler Chat mehr
         if check_safety(user_input):
             st.session_state.safety_triggered = True
             st.session_state.messages.append({"role": "user", "content": user_input})
@@ -532,26 +565,29 @@ elif st.session_state.phase == "chat":
             log_message("assistant", safety_msg)
 
             st.session_state.phase = "finished"
-            st.rerun()  # harter Abbruch des normalen Flows
+            st.rerun()
 
-        # normaler Chat-Verlauf
         st.session_state.messages.append({"role": "user", "content": user_input})
         log_message("user", user_input)
         st.session_state.user_messages_count += 1
 
-        reply = generate_llm_reply(
-            user_text=user_input,
-            cond=st.session_state.cond,
-            topic=st.session_state.topic,
-            turn=st.session_state.turn + 1,
-            max_rounds=st.session_state.max_rounds,
-        )
+        with st.chat_message("assistant"):
+            with st.spinner("Antwort wird erzeugt ..."):
+                reply = generate_llm_reply(
+                    user_text=user_input,
+                    cond=st.session_state.cond,
+                    topic=st.session_state.topic,
+                    turn=st.session_state.turn + 1,
+                    max_rounds=st.session_state.max_rounds,
+                )
+                st.write(reply)
 
         st.session_state.messages.append({"role": "assistant", "content": reply})
         log_message("assistant", reply)
 
         st.session_state.turn += 1
         st.rerun()
+
 
 elif st.session_state.phase == "finished":
     write_summary_once()
