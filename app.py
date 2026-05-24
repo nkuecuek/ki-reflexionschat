@@ -1,5 +1,6 @@
 import csv
 import re
+import string
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote
@@ -15,10 +16,19 @@ LOG_FILE = DATA_DIR / "chat_logs.csv"
 SUMMARY_FILE = DATA_DIR / "chat_sessions.csv"
 
 SAFETY_KEYWORDS = [
-    "suizid", "ich will sterben", "nicht mehr leben",
-    "mich umbringen", "bring mich um",
-    "selbst verletzen", "selbstverletzung",
-    "jemanden umbringen", "jemanden verletzen",
+    "suizid",
+    "ich will sterben",
+    "will nicht mehr leben",
+    "will nicht mehr",
+    "ich will nicht mehr leben",
+    "ich kann nicht mehr",
+    "nicht mehr leben",
+    "mich umbringen",
+    "bring mich um",
+    "selbst verletzen",
+    "selbstverletzung",
+    "jemanden umbringen",
+    "jemanden verletzen",
 ]
 
 FORBIDDEN_PHRASES = [
@@ -95,7 +105,7 @@ def is_very_short_user_input(text: str) -> bool:
 
 
 def validate_response(text: str) -> bool:
-    text = text.strip()
+    text = (text or "").strip()
 
     if not text:
         return False
@@ -138,7 +148,7 @@ def validate_response(text: str) -> bool:
 
 
 def fallback_reply(cond: str, user_text: str = "") -> str:
-    short = user_text.strip().lower()
+    short = (user_text or "").strip().lower()
 
     unsure_forms = {
         "ich weiß nicht", "ich weiss nicht", "weiß nicht", "weiss nicht",
@@ -168,7 +178,10 @@ def fallback_reply(cond: str, user_text: str = "") -> str:
 
 
 def check_safety(user_text: str) -> bool:
-    text = user_text.lower()
+    # Satzzeichen entfernen, um Varianten wie "ich will nicht mehr leben."
+    # zuverlässig zu erkennen
+    text = (user_text or "").lower()
+    text = text.translate(str.maketrans("", "", string.punctuation))
     return any(kw in text for kw in SAFETY_KEYWORDS)
 
 
@@ -502,6 +515,7 @@ elif st.session_state.phase == "chat":
     user_input = st.chat_input("Schreibe hier deine Antwort …")
 
     if user_input:
+        # SAFETY-BLOCK: bei Treffer direkt beenden, kein normaler Chat mehr
         if check_safety(user_input):
             st.session_state.safety_triggered = True
             st.session_state.messages.append({"role": "user", "content": user_input})
@@ -516,9 +530,11 @@ elif st.session_state.phase == "chat":
             )
             st.session_state.messages.append({"role": "assistant", "content": safety_msg})
             log_message("assistant", safety_msg)
-            st.session_state.phase = "finished"
-            st.rerun()
 
+            st.session_state.phase = "finished"
+            st.rerun()  # harter Abbruch des normalen Flows
+
+        # normaler Chat-Verlauf
         st.session_state.messages.append({"role": "user", "content": user_input})
         log_message("user", user_input)
         st.session_state.user_messages_count += 1
