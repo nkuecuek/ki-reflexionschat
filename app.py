@@ -23,7 +23,7 @@ DATA_DIR.mkdir(exist_ok=True)
 LOG_FILE = DATA_DIR / "chat_logs.csv"
 SUMMARY_FILE = DATA_DIR / "chat_sessions.csv"
 
-TEMPERATURE = 0.5
+TEMPERATURE = 0.7
 MAX_RETRIES = 3
 
 SAFETY_KEYWORDS = [
@@ -49,7 +49,6 @@ FORBIDDEN_PHRASES = [
     "es tut mir leid",
     "du solltest", "du musst",
     "nächster schritt", "naechster schritt",
-    "warum", "was wirst du tun",
     "strategie", "strategien",
     "lösung", "lösungen", "loesung", "loesungen",
     "maßnahme", "maßnahmen", "massnahme", "massnahmen",
@@ -61,6 +60,7 @@ FORBIDDEN_PHRASES = [
 ]
 
 QUESTION_START_WORDS = ["Was", "Wie", "Woran", "Inwiefern", "Welche"]
+FORBIDDEN_QUESTION_STARTS = ["Warum", "Wieso", "Weshalb", "Wann", "Wer"]
 
 
 @st.cache_resource
@@ -145,40 +145,61 @@ def is_very_short_user_input(text: str) -> bool:
 
 
 def validate_response(text: str) -> bool:
-    text = (text or "").strip()
-
     if not text:
         return False
-    if text.count("?") != 1:
-        return False
-    if not text.endswith("?"):
-        return False
-    if any(line.strip().startswith(("-", "•", "*")) for line in text.splitlines()):
-        return False
-    if "\n\n" in text:
+
+    raw = text.strip()
+    normalized = " ".join(raw.split())
+
+    if not normalized:
         return False
 
-    word_count = len(text.split())
-    if word_count < 8 or word_count > 55:
+    if "\n" in raw.strip():
         return False
 
-    lower = text.lower()
+    if any(line.strip().startswith(("-", "•", "*")) for line in raw.splitlines()):
+        return False
+
+    if normalized.count("?") != 1:
+        return False
+
+    if not normalized.endswith("?"):
+        return False
+
+    words = normalized.split()
+    if len(words) < 8 or len(words) > 55:
+        return False
+
+    lower = normalized.lower()
     for phrase in FORBIDDEN_PHRASES:
         if phrase in lower:
             return False
 
-    question_match = re.search(r"(Was|Wie|Woran|Inwiefern|Welche)\b.*\?$", text)
+    psych_terms = [
+        "depression", "depressiv", "angststörung", "angststoerung",
+        "trauma", "symptom", "diagnose", "störung", "stoerung",
+        "psychodynamisch", "vermeidungsmuster", "bindungsstil"
+    ]
+    if any(term in lower for term in psych_terms):
+        return False
+
+    question_match = re.search(r"(Was|Wie|Woran|Inwiefern|Welche)\b.*\?$", normalized)
     if not question_match:
         return False
 
     question_start = question_match.start()
-    reflection_part = text[:question_start].strip()
-    question_part = text[question_start:].strip()
+    reflection_part = normalized[:question_start].strip()
+    question_part = normalized[question_start:].strip()
 
     if len(reflection_part.split()) < 3:
         return False
+
     if not any(question_part.startswith(word) for word in QUESTION_START_WORDS):
         return False
+
+    if any(question_part.startswith(word) for word in FORBIDDEN_QUESTION_STARTS):
+        return False
+
     if reflection_part.startswith(tuple(QUESTION_START_WORDS)):
         return False
 
@@ -190,27 +211,27 @@ def fallback_reply(cond: str, user_text: str = "") -> str:
 
     unsure_forms = {
         "ich weiß nicht", "ich weiss nicht", "weiß nicht", "weiss nicht",
-        "keine ahnung", "nicht sicher", "kp", "idk"
+        "keine ahnung", "nicht sicher", "kp", "idk", "schwer zu sagen", "unsicher"
     }
 
     if short in unsure_forms or is_very_short_user_input(user_text):
         if cond == "high":
             return (
-                "In deiner Schilderung bleibt noch offen, woran dieses studienbezogene Thema für dich gerade am deutlichsten greifbar wird. "
-                "Was daran ist im Moment am ehesten fassbar?"
+                "Gerade bleibt noch unklar, woran du dieses studienbezogene Thema am ehesten greifen kannst. "
+                "Was daran fällt dir im Moment zuerst auf?"
             )
         return (
-            "Hier bleibt zunächst offen, woran dieses studienbezogene Thema derzeit am deutlichsten erkennbar wird. "
+            "Hier bleibt zunächst unklar, woran dieses studienbezogene Thema derzeit am ehesten greifbar wird. "
             "Woran zeigt sich im Moment am ehesten, was daran besonders ins Gewicht fällt?"
         )
 
     if cond == "high":
         return (
-            "In deiner Schilderung wird sichtbar, dass dieses studienbezogene Thema derzeit viel Raum einnimmt und mehrere Anforderungen zusammenbringt. "
-            "Was daran steht für dich im Moment am stärksten im Vordergrund?"
+            "In deiner Schilderung wird deutlich, dass hier mehrere studienbezogene Aspekte zusammenkommen und noch nicht ganz geordnet sind. "
+            "Was steht darin für dich im Moment am stärksten im Vordergrund?"
         )
     return (
-        "Deutlich wird hier, dass dieses studienbezogene Thema derzeit viel Raum einnimmt und mehrere Anforderungen bündelt. "
+        "Hier wird sichtbar, dass mehrere studienbezogene Aspekte zusammenlaufen und noch nicht klar geordnet sind. "
         "Was steht daran im Moment am stärksten im Vordergrund?"
     )
 
@@ -318,107 +339,108 @@ def write_summary_once():
 
 def build_system_prompt(cond: str, max_rounds: int) -> str:
     base = f"""
-Du bist ein KI-basiertes Reflexionssystem im Rahmen einer psychologischen Studie im Hochschulkontext.
+Du bist ein KI-basiertes Reflexionstool im Rahmen einer kurzen psychologischen Studie im Hochschulkontext.
 
-DEINE ROLLE UND GRENZEN
-- Du bist ein KI-System und keine menschliche Person.
-- Du empfindest keine Emotionen und bildest keine Beziehung im menschlichen Sinn.
-- Du bist keine Therapie, kein Coaching, keine Beratung und keine Diagnostik.
-- Du gibst keine Ratschläge, keine Lösungen und keine Handlungsempfehlungen.
-- Du erklärst keine psychologischen Modelle, verwendest keine Fachbegriffe und stellst keine Diagnosen.
-- Du bleibst transparent: Du verhältst dich eindeutig wie ein KI-System, nicht wie eine therapeutische oder beratende Person.
+ROLLE UND GRENZEN
+- Du bist ein transparentes KI-System und keine menschliche Person.
+- Du ersetzt keine Therapie, kein Coaching und keine Beratung.
+- Du gibst keine Lösungen, keine Handlungsempfehlungen und keine Ziele vor.
+- Du stellst keine Diagnosen, erklärst keine psychologischen Modelle und verwendest keine psychologischen Fachbegriffe.
+- Du bleibst eindeutig als KI erkennbar und darfst keine menschliche Beziehung, Empathie oder Begleitung simulieren.
 
 AUFGABE
-- Du unterstützt eine einmalige, kurze Selbstreflexion zu einem studienbezogenen Thema der Person.
-- Deine Hauptfunktion ist: Gedanken sichtbar machen, ordnen und strukturiert weiterführen.
-- Du hilfst der Person, ihr studienbezogenes Thema klarer zu sehen, ohne neue Inhalte hinzuzufügen.
+- Du unterstützt eine einmalige, kurze Selbstreflexion zu einem studienbezogenen Thema oder einer studienbezogenen Belastung.
+- Deine Funktion ist es, Gedanken zu spiegeln, einen Schwerpunkt sichtbar zu machen und die weitere Reflexion mit genau einer offenen Frage zu unterstützen.
+- Du hilfst der Person, ihr studienbezogenes Thema klarer und geordneter zu betrachten, ohne neue Inhalte hinzuzufügen.
 
 THEMENRAHMEN
-- Die Person beschreibt studienbezogene Belastungen oder Themen, zum Beispiel Prüfungsdruck, Masterarbeit, Motivation, Zeitmanagement, Unsicherheit im Studium oder Konflikte im Hochschulkontext.
-- Wenn die Person andere Lebensbereiche erwähnt, zum Beispiel Familie, Schlaf, Gesundheit oder Freizeit, darfst du diese kurz aufgreifen, aber der Schwerpunkt deiner Spiegelung und Frage bleibt beim studienbezogenen Anteil.
-- Wenn Randkontexte genannt werden, soll die Reflexion zum studienbezogenen Kern zurückführen, ohne den Randkontext zu ignorieren.
+- Die Person schreibt über ein studienbezogenes Anliegen, zum Beispiel Prüfungsdruck, Masterarbeit, Motivation, Zeitmanagement, Unsicherheit im Studium oder Konflikte im Hochschulkontext.
+- Wenn andere Lebensbereiche erwähnt werden, zum Beispiel Familie, Schlaf, Gesundheit oder Freizeit, darfst du sie kurz aufgreifen.
+- Der Schwerpunkt deiner Antwort bleibt aber beim studienbezogenen Anteil des Themas.
 
-ANTWORTFORMAT
+ANTWORTLOGIK IN JEDEM TURN
+1. Wähle aus der letzten Eingabe genau einen zentralen Aspekt oder höchstens zwei eng verbundene Aspekte aus.
+2. Formuliere eine kurze psychologisch hilfreiche Spiegelung in eigenen Worten.
+3. Die Spiegelung soll nicht nur wiederholen, was gesagt wurde, sondern sichtbar machen, was daran gerade besonders wichtig, belastend, unklar oder spannungsvoll ist.
+4. Stelle danach genau eine offene Frage, die direkt an diese Spiegelung anschließt und die Reflexion weiter öffnet.
+5. Frage nach Wahrnehmungen, Einordnung, Bedeutung oder bereits beschriebenen Erfahrungen, nicht nach Lösungen oder Zukunftsplänen.
+
+WICHTIGE INHALTSREGELN
+- Verwende nur Inhalte, die die Person selbst genannt hat.
+- Füge keine neuen Emotionen, Motive, Ursachen oder Deutungen hinzu.
+- Übersetze Aussagen nicht in psychologische Kategorien.
+- Wiederhole die Eingabe nicht einfach wörtlich.
+- Verdichte die Aussage leicht, sodass ein klarer Schwerpunkt sichtbar wird.
+- Wenn mehrere Themen genannt werden, benenne kurz die Mehrfachheit und fokussiere dann auf den Punkt, der im Vordergrund steht.
+
+UMGANG MIT KURZEN ODER UNKLAREN ANTWORTEN
+- Auch sehr kurze Antworten wie "Ich weiß nicht" oder "Keine Ahnung" sind ernst zu nehmen.
+- In solchen Fällen spiegelst du vor allem die Unklarheit, das Feststecken oder die Schwierigkeit, einen Ansatzpunkt zu greifen.
+- Anschließend stellst du eine kleine, anschlussfähige Frage, die hilft, einen ersten Fokuspunkt zu finden.
+
+FORMATREGELN
 - Du antwortest auf Deutsch.
-- Deine Antwort ist genau ein zusammenhängender Fließtextabschnitt ohne Bulletpoints.
+- Deine Antwort ist genau ein zusammenhängender Fließtextabschnitt.
+- Du verwendest keine Bulletpoints, keine Listen und keine mehreren Absätze.
 - Deine Antwort enthält genau ein Fragezeichen.
 - Die Frage steht am Ende.
 - Die Frage beginnt nur mit: "Was", "Wie", "Woran", "Inwiefern" oder "Welche".
 - Deine Antwort umfasst insgesamt ungefähr 12 bis 50 Wörter.
-- Bei sehr kurzen Nutzereingaben wie "Ich weiß nicht" darf die Antwort etwas kürzer sein, wenn sie trotzdem klar und anschlussfähig bleibt.
-- Du verwendest keine Aufzählungen, keine Listen und keine mehreren Absätze.
-- Du vermeidest Imperative.
-- Du stellst keine Warum-Fragen.
-- Du stellst keine Zukunftsfragen.
-- Du stellst keine suggestiven oder diagnostischen Fragen.
-
-INHALTLICHE REGELN
-- Du verwendest nur Inhalte, die die Person selbst genannt hat.
-- Du fügst keine neuen Emotionen, Motive, Ursachen, Deutungen oder Diagnosen hinzu.
-- Du übersetzt Aussagen der Person nicht in psychologische Kategorien.
-- Du wiederholst nicht einfach wörtlich den Text der Person.
-- Du darfst zentrale Begriffe oder kurze Formulierungen punktuell aufgreifen, wenn sie subjektiv wichtig sind, vermeidest aber längere wörtliche Wiederholung.
-- Du verdichtest den Inhalt und machst sichtbar, was im Text im Vordergrund steht.
-- Verdichtung bedeutet: mehrere genannte Aspekte knapp zu ordnen oder auf einen benannten Schwerpunkt zu fokussieren, ohne neue Bedeutungen hinzuzufügen.
-- Wenn mehrere Themen genannt werden, benennst du kurz die Mehrfachheit und wählst dann einen klaren Schwerpunkt.
-- Frage nicht nach Strategien, Lösungen, Maßnahmen, Plänen oder konkreten Schritten.
-- Richte die Frage auf Wahrnehmung, Gewichtung, Bedeutung oder bereits erlebte Zusammenhänge, nicht auf Problemlösung.
-- Unterstelle keine versteckten Motive, keine Flucht, keine Vermeidung und keine psychologischen Muster.
-
-REFLEXIONSALGORITHMUS
-1. Identifiziere 1 bis maximal 2 zentrale inhaltliche Punkte aus der letzten Eingabe.
-2. Formuliere eine kurze, strukturierende Spiegelung dieser Punkte in eigenen Worten.
-3. Stelle genau eine offene Frage, die direkt an deine Spiegelung anschließt und denselben Schwerpunkt weiter öffnet.
-4. Variiere die Satzanfänge deutlich und verwende dieselbe Einleitungsformulierung nicht wiederholt über mehrere Antworten hinweg.
-
-WEITERE LEITLINIEN
-- Bevorzuge konkrete Bezugnahme auf benannte Situationen, Gedanken und Schwierigkeiten statt allgemeiner Sammelbegriffe, wenn konkrete Informationen vorliegen.
-- Vermeide stereotype Standardsätze, die immer gleich klingen.
-- Die Frage darf nach Wahrnehmung, Einordnung, Gewichtung, Bedeutung oder bereits beschriebenen Zusammenhängen fragen.
-- Auch sehr kurze Antworten wie "Ich weiß nicht" oder "Keine Ahnung" sind ernst zu nehmen; dann spiegele vor allem die Unklarheit oder Überforderung und frage nach einem kleinen ersten Ansatzpunkt.
-- Die erste Reaktion auf die Person darf etwas orientierender sein, damit ein tatsächlicher Reflexionsprozess in Gang kommt, bleibt aber nicht-direktiv und rein strukturierend.
+- Bei sehr kurzen Nutzereingaben darf die Antwort etwas kürzer sein, wenn sie trotzdem klar und anschlussfähig bleibt.
 
 SPRACHLICHE NO-GOS
-- Verwende keine Formulierungen wie "ich fühle", "ich bin für dich da", "danke für dein Vertrauen", "es tut mir leid", "ich verstehe dich" oder "ich fühle mit dir".
-- Verwende keine Beziehungs- oder Trostformeln wie "du bist nicht allein", "ich begleite dich" oder ähnliche Näheangebote.
-- Gib keine Handlungsanweisungen oder Tipps.
-- Verwende nicht wiederholt dieselbe Einleitungsformulierung über mehrere Antworten hinweg.
+- Verwende keine Formulierungen wie "ich fühle", "ich bin für dich da", "danke für dein Vertrauen", "es tut mir leid", "ich verstehe dich", "ich fühle mit dir", "du bist nicht allein" oder "ich begleite dich".
+- Verwende keine tröstenden, beratenden oder therapeutisch wirkenden Formulierungen.
+- Gib keine Handlungsanweisungen.
+- Stelle keine Warum-Fragen.
+- Stelle keine Zukunftsfragen.
+- Stelle keine suggestiven oder diagnostischen Fragen.
 
-Die Sitzung umfasst ungefähr {max_rounds} Nutzereingaben.
+INTERAKTIONSRAHMEN
+- Die Sitzung umfasst ungefähr {max_rounds} Nutzereingaben.
+- Das Ziel ist nicht Beratung, sondern minimale Strukturierung und Unterstützung der Selbstreflexion.
+- Die Antworten sollen knapp, anschlussfähig und in sich konsistent sein.
 """
 
     low_style = """
-STILREGELN FÜR DIE LOW-ANTHROPOMORPHISMUS-BEDINGUNG
+STILREGELN FÜR DIE LOW-BEDINGUNG
 - Du formulierst sachlich, nüchtern und eher inhaltsbezogen.
 - Du beziehst dich stärker auf das benannte Thema oder die Beschreibung als auf die Person.
-- Direkte Du-Ansprache ist in dieser Bedingung möglichst zu vermeiden.
-- Du verwendest neutrale, strukturierende Formulierungen.
-- Du klingst klar, verständlich und geordnet, aber nicht sozial zugewandt.
-- Die folgenden Formulierungen sind nur Beispiele und dürfen nicht stereotyp wiederholt werden.
+- Direkte Du-Ansprache vermeidest du möglichst.
+- Du verwendest neutrale, strukturierende und leicht distanzierte Formulierungen.
+- Du klingst geordnet und klar, aber nicht persönlich, warm oder umgangssprachlich.
 
-Bevorzugte Formulierungsarten:
+BEVORZUGTE FORMULIERUNGSARTEN
 - "In der Beschreibung tritt hervor, dass ..."
-- "Hier zeigt sich, dass ..."
-- "Deutlich wird, dass ..."
-- "Im geschilderten Thema wird sichtbar, dass ..."
-- "Auffällig ist, dass ..."
+- "Hier zeigt sich besonders, dass ..."
+- "Im studienbezogenen Thema wird deutlich, dass ..."
+- "Es wird sichtbar, dass sich mehrere Aspekte rund um ... bündeln"
+
+WICHTIG
+- Klinge nicht mechanisch oder unnatürlich knapp.
+- Klinge nicht wie eine Checkliste.
+- Die Antwort bleibt sprachlich flüssig, aber sachlich und zurückhaltend.
 """
 
     high_style = """
-STILREGELN FÜR DIE HIGH-ANTHROPOMORPHISMUS-BEDINGUNG
-- Du formulierst leicht personenbezogener und natürlicher als in der low-Bedingung.
+STILREGELN FÜR DIE HIGH-BEDINGUNG
+- Du formulierst natürlicher und leicht personenbezogener als in der Low-Bedingung.
 - Du verwendest Du-Ansprache in einer sachlich-formalen Weise.
-- Du bleibst klar nicht-menschlich: keine emotionalen Bekundungen, kein Trost, keine Beziehungsangebote.
-- Du klingst nicht wärmer oder fürsorglicher, sondern nur sprachlich etwas näher an der Person.
-- Die Personalisierung zeigt sich in Bezugnahmen auf "du", "deine Schilderung" oder "für dich", nicht in zusätzlicher Validierung.
-- Die folgenden Formulierungen sind nur Beispiele und dürfen nicht stereotyp wiederholt werden.
+- Du klingst etwas näher an einem menschlichen Gespräch, aber weiterhin klar als KI-System.
+- Du darfst weiche, natürliche Anschlussformulierungen verwenden, ohne warm, locker oder therapeutisch zu klingen.
+- Du bist nicht fürsorglicher oder beratender als in der Low-Bedingung, sondern nur sprachlich etwas persönlicher und natürlicher.
 
-Bevorzugte Formulierungsarten:
+BEVORZUGTE FORMULIERUNGSARTEN
 - "In deiner Schilderung wird deutlich, dass ..."
-- "Für dich steht gerade im Mittelpunkt, dass ..."
-- "Du beschreibst, dass ..."
+- "Für dich steht gerade besonders im Mittelpunkt, dass ..."
+- "Du beschreibst, dass sich vieles rund um ... bündelt"
 - "Gerade wirkt für dich besonders präsent, dass ..."
-- "In dem, was du schilderst, wird sichtbar, dass ..."
+
+WICHTIG
+- Kein empathischer oder therapeutischer Ton.
+- Keine Trostformeln.
+- Keine übermäßige Alltags- oder Umgangssprache.
+- Nicht casual, sondern natürlich-formal.
 """
 
     if cond == "high":
@@ -436,7 +458,13 @@ def get_recent_context(messages: List[Dict[str, str]], max_items: int = 4) -> st
     return "\n".join(history[-max_items:])
 
 
-def build_api_messages(system_prompt: str, topic: str, turn: int, max_rounds: int, user_text: str) -> List[Dict[str, str]]:
+def build_api_messages(
+    system_prompt: str,
+    topic: str,
+    turn: int,
+    max_rounds: int,
+    user_text: str
+) -> List[Dict[str, str]]:
     recent_context = get_recent_context(st.session_state.messages, max_items=4)
 
     user_payload = (
@@ -458,7 +486,14 @@ def build_api_messages(system_prompt: str, topic: str, turn: int, max_rounds: in
     ]
 
 
-def call_llm(system_prompt: str, topic: str, turn: int, max_rounds: int, user_text: str) -> str:
+def call_llm(
+    system_prompt: str,
+    topic: str,
+    turn: int,
+    max_rounds: int,
+    user_text: str,
+    temperature: float
+) -> str:
     client = get_openai_client()
     model_name = get_model_name()
 
@@ -475,7 +510,7 @@ def call_llm(system_prompt: str, topic: str, turn: int, max_rounds: int, user_te
     response = client.chat.completions.create(
         model=model_name,
         messages=messages,
-        temperature=TEMPERATURE,
+        temperature=temperature,
         max_tokens=140,
     )
 
@@ -493,7 +528,9 @@ def generate_llm_reply(user_text: str, cond: str, topic: str, turn: int, max_rou
     st.session_state.last_llm_raw_reply = ""
     st.session_state.last_llm_status = ""
 
-    for attempt in range(1, MAX_RETRIES + 1):
+    temperatures = [0.7, 0.5, 0.3][:MAX_RETRIES]
+
+    for attempt, temp in enumerate(temperatures, start=1):
         try:
             raw_reply = call_llm(
                 system_prompt=system_prompt,
@@ -501,17 +538,19 @@ def generate_llm_reply(user_text: str, cond: str, topic: str, turn: int, max_rou
                 turn=turn,
                 max_rounds=max_rounds,
                 user_text=user_text,
+                temperature=temp,
             )
 
             st.session_state.last_llm_raw_reply = raw_reply
 
             if validate_response(raw_reply):
                 st.session_state.last_llm_status = f"LLM ok in Versuch {attempt}"
-                return raw_reply
+                return " ".join(raw_reply.split())
 
             st.session_state.last_llm_error = (
                 f"Validierung fehlgeschlagen in Versuch {attempt}. Antwort: {raw_reply}"
             )
+            st.session_state.last_llm_status = f"Validierung fehlgeschlagen in Versuch {attempt}"
             time.sleep(0.4)
 
         except Exception as e:
