@@ -149,11 +149,15 @@ def validate_response(text: str) -> bool:
     if not text:
         return False
 
-    raw = text.strip()
+    raw = (text or "").strip()
+    # Zeilenumbrüche in Leerzeichen wandeln
+    raw = raw.replace("\n", " ")
     normalized = " ".join(raw.split())
 
     if not normalized:
         return False
+
+    # KEINE separate \n-Prüfung mehr
 
     # Mehrere Absätze und Listenzeichen verhindern
     if "\n" in raw.strip():
@@ -169,7 +173,7 @@ def validate_response(text: str) -> bool:
 
     # Wortanzahl begrenzen
     words = normalized.split()
-    if len(words) < 8 or len(words) > 55:
+    if len(words) < 8 or len(words) > 70:
         return False
 
     lower = normalized.lower()
