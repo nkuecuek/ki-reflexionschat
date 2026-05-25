@@ -25,6 +25,7 @@ SUMMARY_FILE = DATA_DIR / "chat_sessions.csv"
 
 TEMPERATURE = 0.7
 MAX_RETRIES = 3
+DEFAULT_ROUNDS = 8  # <–– hier stellst du global die Standardanzahl der Runden ein
 
 SAFETY_KEYWORDS = [
     "suizid",
@@ -154,18 +155,19 @@ def validate_response(text: str) -> bool:
     if not normalized:
         return False
 
+    # Mehrere Absätze und Listenzeichen verhindern
     if "\n" in raw.strip():
         return False
-
     if any(line.strip().startswith(("-", "•", "*")) for line in raw.splitlines()):
         return False
 
+    # Genau eine Frage, Frage am Ende
     if normalized.count("?") != 1:
         return False
-
     if not normalized.endswith("?"):
         return False
 
+    # Wortanzahl begrenzen
     words = normalized.split()
     if len(words) < 8 or len(words) > 55:
         return False
@@ -183,6 +185,7 @@ def validate_response(text: str) -> bool:
     if any(term in lower for term in psych_terms):
         return False
 
+    # Frage mit erlaubtem Start
     question_match = re.search(r"(Was|Wie|Woran|Inwiefern|Welche)\b.*\?$", normalized)
     if not question_match:
         return False
@@ -196,7 +199,6 @@ def validate_response(text: str) -> bool:
 
     if not any(question_part.startswith(word) for word in QUESTION_START_WORDS):
         return False
-
     if any(question_part.startswith(word) for word in FORBIDDEN_QUESTION_STARTS):
         return False
 
@@ -214,24 +216,26 @@ def fallback_reply(cond: str, user_text: str = "") -> str:
         "keine ahnung", "nicht sicher", "kp", "idk", "schwer zu sagen", "unsicher"
     }
 
+    # sehr kurz / unklar
     if short in unsure_forms or is_very_short_user_input(user_text):
         if cond == "high":
             return (
-                "Gerade bleibt noch unklar, woran du dieses studienbezogene Thema am ehesten greifen kannst. "
-                "Was daran fällt dir im Moment zuerst auf?"
+                "Gerade wirkt noch unklar, woran du dieses studienbezogene Thema im Moment am ehesten greifen kannst. "
+                "Was daran fällt dir gerade als erstes auf?"
             )
         return (
             "Hier bleibt zunächst unklar, woran dieses studienbezogene Thema derzeit am ehesten greifbar wird. "
-            "Woran zeigt sich im Moment am ehesten, was daran besonders ins Gewicht fällt?"
+            "Woran zeigt sich im Moment am deutlichsten, was daran besonders ins Gewicht fällt?"
         )
 
+    # allgemeiner Fallback
     if cond == "high":
         return (
             "In deiner Schilderung wird deutlich, dass hier mehrere studienbezogene Aspekte zusammenkommen und noch nicht ganz geordnet sind. "
             "Was steht darin für dich im Moment am stärksten im Vordergrund?"
         )
     return (
-        "Hier wird sichtbar, dass mehrere studienbezogene Aspekte zusammenlaufen und noch nicht klar geordnet sind. "
+        "In der Beschreibung wird sichtbar, dass mehrere studienbezogene Aspekte zusammenlaufen und noch nicht klar geordnet sind. "
         "Was steht daran im Moment am stärksten im Vordergrund?"
     )
 
@@ -261,13 +265,13 @@ def init_state():
         pid = f"test_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
 
     return_url = get_param("return_url", "")
-    max_rounds = get_param("rounds", "5")
+    max_rounds_param = get_param("rounds", str(DEFAULT_ROUNDS))
     debug_mode = get_debug_mode()
 
     try:
-        max_rounds_int = max(1, min(int(max_rounds), 10))
+        max_rounds_int = max(1, min(int(max_rounds_param), 10))
     except ValueError:
-        max_rounds_int = 5
+        max_rounds_int = DEFAULT_ROUNDS
 
     defaults = {
         "phase": "intro",
@@ -407,40 +411,28 @@ STILREGELN FÜR DIE LOW-BEDINGUNG
 - Du formulierst sachlich, nüchtern und eher inhaltsbezogen.
 - Du beziehst dich stärker auf das benannte Thema oder die Beschreibung als auf die Person.
 - Direkte Du-Ansprache vermeidest du möglichst.
-- Du verwendest neutrale, strukturierende und leicht distanzierte Formulierungen.
-- Du klingst geordnet und klar, aber nicht persönlich, warm oder umgangssprachlich.
+- Du verwendest neutrale, strukturierende Formulierungen.
+- Du klingst klar und geordnet, aber nicht persönlich oder umgangssprachlich.
 
 BEVORZUGTE FORMULIERUNGSARTEN
-- "In der Beschreibung tritt hervor, dass ..."
-- "Hier zeigt sich besonders, dass ..."
-- "Im studienbezogenen Thema wird deutlich, dass ..."
-- "Es wird sichtbar, dass sich mehrere Aspekte rund um ... bündeln"
-
-WICHTIG
-- Klinge nicht mechanisch oder unnatürlich knapp.
-- Klinge nicht wie eine Checkliste.
-- Die Antwort bleibt sprachlich flüssig, aber sachlich und zurückhaltend.
+- "In der Beschreibung wird sichtbar, dass ..."
+- "Hier deutet sich an, dass ..."
+- "Im studienbezogenen Thema steht besonders im Vordergrund, dass ..."
+- "Auffällig ist hier vor allem, dass ..."
 """
 
     high_style = """
 STILREGELN FÜR DIE HIGH-BEDINGUNG
 - Du formulierst natürlicher und leicht personenbezogener als in der Low-Bedingung.
 - Du verwendest Du-Ansprache in einer sachlich-formalen Weise.
-- Du klingst etwas näher an einem menschlichen Gespräch, aber weiterhin klar als KI-System.
-- Du darfst weiche, natürliche Anschlussformulierungen verwenden, ohne warm, locker oder therapeutisch zu klingen.
-- Du bist nicht fürsorglicher oder beratender als in der Low-Bedingung, sondern nur sprachlich etwas persönlicher und natürlicher.
+- Du klingst etwas näher an einem Gespräch, aber weiterhin klar als KI-System.
+- Du verwendest keine warmen, tröstenden oder therapeutischen Formulierungen.
 
 BEVORZUGTE FORMULIERUNGSARTEN
 - "In deiner Schilderung wird deutlich, dass ..."
-- "Für dich steht gerade besonders im Mittelpunkt, dass ..."
-- "Du beschreibst, dass sich vieles rund um ... bündelt"
+- "Für dich scheint im Moment besonders wichtig zu sein, dass ..."
+- "Du beschreibst, dass ..."
 - "Gerade wirkt für dich besonders präsent, dass ..."
-
-WICHTIG
-- Kein empathischer oder therapeutischer Ton.
-- Keine Trostformeln.
-- Keine übermäßige Alltags- oder Umgangssprache.
-- Nicht casual, sondern natürlich-formal.
 """
 
     if cond == "high":
@@ -620,6 +612,8 @@ def render_debug_sidebar():
             st.write("Letzter Prompt-Ausschnitt:")
             st.code(st.session_state.last_prompt_excerpt)
 
+
+# === Streamlit App Flow ===
 
 init_state()
 render_debug_sidebar()
