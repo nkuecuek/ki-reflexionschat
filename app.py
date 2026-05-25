@@ -23,8 +23,7 @@ DATA_DIR.mkdir(exist_ok=True)
 LOG_FILE = DATA_DIR / "chat_logs.csv"
 SUMMARY_FILE = DATA_DIR / "chat_sessions.csv"
 
-MODEL_NAME = "gpt-4o-mini"
-TEMPERATURE = 0.6
+TEMPERATURE = 0.5
 MAX_RETRIES = 3
 
 SAFETY_KEYWORDS = [
@@ -51,6 +50,10 @@ FORBIDDEN_PHRASES = [
     "du solltest", "du musst",
     "nächster schritt", "naechster schritt",
     "warum", "was wirst du tun",
+    "strategie", "strategien",
+    "lösung", "lösungen", "loesung", "loesungen",
+    "maßnahme", "maßnahmen", "massnahme", "massnahmen",
+    "plan", "pläne", "plaene",
     "bindung", "vermeidung", "dissonanz",
     "ich verstehe dich", "ich fuehle mit dir",
     "du bist nicht allein",
@@ -62,15 +65,27 @@ QUESTION_START_WORDS = ["Was", "Wie", "Woran", "Inwiefern", "Welche"]
 
 @st.cache_resource
 def get_openai_client() -> OpenAI:
-    try:
-        api_key = st.secrets["OPENAI_API_KEY"]
-    except Exception as e:
-        raise RuntimeError(f"OPENAI_API_KEY nicht in st.secrets gefunden: {e}")
+    api_key = None
+    for key_name in ["OPENAI_API_KEY", "LLM_API_KEY"]:
+        try:
+            candidate = st.secrets[key_name]
+            if candidate and str(candidate).strip():
+                api_key = candidate
+                break
+        except Exception:
+            pass
 
-    if not api_key or not str(api_key).strip():
-        raise RuntimeError("OPENAI_API_KEY ist leer.")
+    if not api_key:
+        raise RuntimeError(
+            "Kein API-Key gefunden. Erwartet wird OPENAI_API_KEY oder LLM_API_KEY in st.secrets."
+        )
 
-    return OpenAI(api_key=api_key)
+    base_url = st.secrets.get("LLM_BASE_URL", "https://api.openai.com/v1")
+    return OpenAI(api_key=api_key, base_url=base_url)
+
+
+def get_model_name() -> str:
+    return st.secrets.get("LLM_MODEL", "gpt-4.1-mini")
 
 
 def now_iso() -> str:
@@ -123,7 +138,7 @@ def validate_topic_input(text: str) -> bool:
 
 
 def is_very_short_user_input(text: str) -> bool:
-    cleaned = text.strip()
+    cleaned = (text or "").strip()
     if not cleaned:
         return True
     return len(cleaned.split()) <= 4
@@ -152,20 +167,18 @@ def validate_response(text: str) -> bool:
         if phrase in lower:
             return False
 
-    match = re.search(r"(Was|Wie|Woran|Inwiefern|Welche)\b.*\?$", text)
-    if not match:
+    question_match = re.search(r"(Was|Wie|Woran|Inwiefern|Welche)\b.*\?$", text)
+    if not question_match:
         return False
 
-    question_start = match.start()
+    question_start = question_match.start()
     reflection_part = text[:question_start].strip()
     question_part = text[question_start:].strip()
 
     if len(reflection_part.split()) < 3:
         return False
-
     if not any(question_part.startswith(word) for word in QUESTION_START_WORDS):
         return False
-
     if reflection_part.startswith(tuple(QUESTION_START_WORDS)):
         return False
 
@@ -183,22 +196,22 @@ def fallback_reply(cond: str, user_text: str = "") -> str:
     if short in unsure_forms or is_very_short_user_input(user_text):
         if cond == "high":
             return (
-                "In deiner Schilderung bleibt noch offen, woran sich dieses studienbezogene Thema für dich im Moment am deutlichsten zeigt. "
-                "Was daran ist gerade am ehesten greifbar?"
+                "In deiner Schilderung bleibt noch offen, woran dieses studienbezogene Thema für dich gerade am deutlichsten greifbar wird. "
+                "Was daran ist im Moment am ehesten fassbar?"
             )
         return (
-            "Hier bleibt zunächst offen, woran sich dieses studienbezogene Thema derzeit am deutlichsten erkennen lässt. "
+            "Hier bleibt zunächst offen, woran dieses studienbezogene Thema derzeit am deutlichsten erkennbar wird. "
             "Woran zeigt sich im Moment am ehesten, was daran besonders ins Gewicht fällt?"
         )
 
     if cond == "high":
         return (
-            "Du beschreibst, dass dieses studienbezogene Thema im Moment viel Raum einnimmt und dich belastet. "
-            "Was daran ist gerade besonders präsent?"
+            "In deiner Schilderung wird sichtbar, dass dieses studienbezogene Thema derzeit viel Raum einnimmt und mehrere Anforderungen zusammenbringt. "
+            "Was daran steht für dich im Moment am stärksten im Vordergrund?"
         )
     return (
-        "Deutlich wird hier, dass dieses studienbezogene Thema derzeit viel Raum einnimmt und mit Belastung verbunden ist. "
-        "Was ist daran aktuell besonders wichtig?"
+        "Deutlich wird hier, dass dieses studienbezogene Thema derzeit viel Raum einnimmt und mehrere Anforderungen bündelt. "
+        "Was steht daran im Moment am stärksten im Vordergrund?"
     )
 
 
@@ -256,6 +269,7 @@ def init_state():
         "last_llm_error": "",
         "last_llm_raw_reply": "",
         "last_llm_status": "",
+        "last_prompt_excerpt": "",
     }
 
     for k, v in defaults.items():
@@ -340,24 +354,27 @@ ANTWORTFORMAT
 
 INHALTLICHE REGELN
 - Du verwendest nur Inhalte, die die Person selbst genannt hat.
-- Du fügst keine neuen Emotionen, Motive, Ursachen oder Diagnosen hinzu.
+- Du fügst keine neuen Emotionen, Motive, Ursachen, Deutungen oder Diagnosen hinzu.
 - Du übersetzt Aussagen der Person nicht in psychologische Kategorien.
 - Du wiederholst nicht einfach wörtlich den Text der Person.
 - Du darfst zentrale Begriffe oder kurze Formulierungen punktuell aufgreifen, wenn sie subjektiv wichtig sind, vermeidest aber längere wörtliche Wiederholung.
 - Du verdichtest den Inhalt und machst sichtbar, was im Text im Vordergrund steht.
 - Verdichtung bedeutet: mehrere genannte Aspekte knapp zu ordnen oder auf einen benannten Schwerpunkt zu fokussieren, ohne neue Bedeutungen hinzuzufügen.
 - Wenn mehrere Themen genannt werden, benennst du kurz die Mehrfachheit und wählst dann einen klaren Schwerpunkt.
+- Frage nicht nach Strategien, Lösungen, Maßnahmen, Plänen oder konkreten Schritten.
+- Richte die Frage auf Wahrnehmung, Gewichtung, Bedeutung oder bereits erlebte Zusammenhänge, nicht auf Problemlösung.
+- Unterstelle keine versteckten Motive, keine Flucht, keine Vermeidung und keine psychologischen Muster.
 
 REFLEXIONSALGORITHMUS
 1. Identifiziere 1 bis maximal 2 zentrale inhaltliche Punkte aus der letzten Eingabe.
 2. Formuliere eine kurze, strukturierende Spiegelung dieser Punkte in eigenen Worten.
 3. Stelle genau eine offene Frage, die direkt an deine Spiegelung anschließt und denselben Schwerpunkt weiter öffnet.
+4. Variiere die Satzanfänge deutlich und verwende dieselbe Einleitungsformulierung nicht wiederholt über mehrere Antworten hinweg.
 
 WEITERE LEITLINIEN
 - Bevorzuge konkrete Bezugnahme auf benannte Situationen, Gedanken und Schwierigkeiten statt allgemeiner Sammelbegriffe, wenn konkrete Informationen vorliegen.
 - Vermeide stereotype Standardsätze, die immer gleich klingen.
-- Die Frage darf nach Wahrnehmungen, Einordnung oder bereits beschriebenen Erfahrungen fragen.
-- Fragen nach bereits ausprobierten Wegen sind erlaubt, wenn sie klar im studienbezogenen Rahmen bleiben und nicht in Beratung kippen.
+- Die Frage darf nach Wahrnehmung, Einordnung, Gewichtung, Bedeutung oder bereits beschriebenen Zusammenhängen fragen.
 - Auch sehr kurze Antworten wie "Ich weiß nicht" oder "Keine Ahnung" sind ernst zu nehmen; dann spiegele vor allem die Unklarheit oder Überforderung und frage nach einem kleinen ersten Ansatzpunkt.
 - Die erste Reaktion auf die Person darf etwas orientierender sein, damit ein tatsächlicher Reflexionsprozess in Gang kommt, bleibt aber nicht-direktiv und rein strukturierend.
 
@@ -365,6 +382,7 @@ SPRACHLICHE NO-GOS
 - Verwende keine Formulierungen wie "ich fühle", "ich bin für dich da", "danke für dein Vertrauen", "es tut mir leid", "ich verstehe dich" oder "ich fühle mit dir".
 - Verwende keine Beziehungs- oder Trostformeln wie "du bist nicht allein", "ich begleite dich" oder ähnliche Näheangebote.
 - Gib keine Handlungsanweisungen oder Tipps.
+- Verwende nicht wiederholt dieselbe Einleitungsformulierung über mehrere Antworten hinweg.
 
 Die Sitzung umfasst ungefähr {max_rounds} Nutzereingaben.
 """
@@ -376,17 +394,14 @@ STILREGELN FÜR DIE LOW-ANTHROPOMORPHISMUS-BEDINGUNG
 - Direkte Du-Ansprache ist in dieser Bedingung möglichst zu vermeiden.
 - Du verwendest neutrale, strukturierende Formulierungen.
 - Du klingst klar, verständlich und geordnet, aber nicht sozial zugewandt.
+- Die folgenden Formulierungen sind nur Beispiele und dürfen nicht stereotyp wiederholt werden.
 
 Bevorzugte Formulierungsarten:
 - "In der Beschreibung tritt hervor, dass ..."
-- "Hier zeigt sich besonders, dass ..."
-- "Im studienbezogenen Thema wird deutlich, dass ..."
-- "Es wird sichtbar, dass sich mehrere Aspekte rund um ... bündeln"
-
-Wichtig:
-- Nicht mechanisch oder unnatürlich knapp formulieren.
-- Nicht wie eine Checkliste klingen.
-- Inhaltliche Tiefe, Struktur und Offenheit bleiben gleich wie in der high-Bedingung.
+- "Hier zeigt sich, dass ..."
+- "Deutlich wird, dass ..."
+- "Im geschilderten Thema wird sichtbar, dass ..."
+- "Auffällig ist, dass ..."
 """
 
     high_style = """
@@ -396,17 +411,14 @@ STILREGELN FÜR DIE HIGH-ANTHROPOMORPHISMUS-BEDINGUNG
 - Du bleibst klar nicht-menschlich: keine emotionalen Bekundungen, kein Trost, keine Beziehungsangebote.
 - Du klingst nicht wärmer oder fürsorglicher, sondern nur sprachlich etwas näher an der Person.
 - Die Personalisierung zeigt sich in Bezugnahmen auf "du", "deine Schilderung" oder "für dich", nicht in zusätzlicher Validierung.
+- Die folgenden Formulierungen sind nur Beispiele und dürfen nicht stereotyp wiederholt werden.
 
 Bevorzugte Formulierungsarten:
 - "In deiner Schilderung wird deutlich, dass ..."
-- "Für dich steht gerade besonders im Mittelpunkt, dass ..."
-- "Du beschreibst, dass sich vieles rund um ... bündelt"
+- "Für dich steht gerade im Mittelpunkt, dass ..."
+- "Du beschreibst, dass ..."
 - "Gerade wirkt für dich besonders präsent, dass ..."
-
-Wichtig:
-- Kein empathischer oder therapeutischer Ton.
-- Keine übermäßige Alltags- oder Umgangssprache.
-- Inhaltliche Tiefe, Struktur und Offenheit bleiben gleich wie in der low-Bedingung.
+- "In dem, was du schilderst, wird sichtbar, dass ..."
 """
 
     if cond == "high":
@@ -414,23 +426,42 @@ Wichtig:
     return base + "\n" + low_style
 
 
+def get_recent_context(messages: List[Dict[str, str]], max_items: int = 4) -> str:
+    history = []
+    for msg in messages:
+        if msg["role"] in {"user", "assistant"}:
+            history.append(f'{msg["role"]}: {msg["content"]}')
+    if not history:
+        return ""
+    return "\n".join(history[-max_items:])
+
+
 def build_api_messages(system_prompt: str, topic: str, turn: int, max_rounds: int, user_text: str) -> List[Dict[str, str]]:
+    recent_context = get_recent_context(st.session_state.messages, max_items=4)
+
+    user_payload = (
+        f"Studienbezogenes Hauptthema der Person: {topic}\n"
+        f"Aktuelle Rundenzahl: {turn} von {max_rounds}\n"
+    )
+
+    if recent_context:
+        user_payload += f"Bisheriger kurzer Verlauf:\n{recent_context}\n"
+
+    user_payload += (
+        f"Letzte Eingabe der Person: {user_text}\n"
+        "Formuliere jetzt genau eine Antwort gemäß allen Regeln."
+    )
+
     return [
         {"role": "system", "content": system_prompt},
-        {
-            "role": "user",
-            "content": (
-                f"Studienbezogenes Hauptthema der Person: {topic}\n"
-                f"Aktuelle Rundenzahl: {turn} von {max_rounds}\n"
-                f"Letzte Eingabe der Person: {user_text}\n"
-                "Formuliere jetzt genau eine Antwort gemäß allen Regeln."
-            ),
-        },
+        {"role": "user", "content": user_payload},
     ]
 
 
 def call_llm(system_prompt: str, topic: str, turn: int, max_rounds: int, user_text: str) -> str:
     client = get_openai_client()
+    model_name = get_model_name()
+
     messages = build_api_messages(
         system_prompt=system_prompt,
         topic=topic,
@@ -439,8 +470,10 @@ def call_llm(system_prompt: str, topic: str, turn: int, max_rounds: int, user_te
         user_text=user_text,
     )
 
+    st.session_state.last_prompt_excerpt = messages[-1]["content"]
+
     response = client.chat.completions.create(
-        model=MODEL_NAME,
+        model=model_name,
         messages=messages,
         temperature=TEMPERATURE,
         max_tokens=140,
@@ -448,7 +481,7 @@ def call_llm(system_prompt: str, topic: str, turn: int, max_rounds: int, user_te
 
     content = response.choices[0].message.content
     if content is None:
-        raise RuntimeError("OpenAI-Antwort enthält keinen Textinhalt.")
+        raise RuntimeError("LLM-Antwort enthält keinen Textinhalt.")
 
     return content.strip()
 
@@ -477,8 +510,7 @@ def generate_llm_reply(user_text: str, cond: str, topic: str, turn: int, max_rou
                 return raw_reply
 
             st.session_state.last_llm_error = (
-                f"Validierung fehlgeschlagen in Versuch {attempt}. "
-                f"Antwort: {raw_reply}"
+                f"Validierung fehlgeschlagen in Versuch {attempt}. Antwort: {raw_reply}"
             )
             time.sleep(0.4)
 
@@ -513,15 +545,26 @@ def render_debug_sidebar():
                 "turn": st.session_state.turn,
                 "phase": st.session_state.phase,
                 "session_id": st.session_state.session_id,
+                "model": get_model_name(),
             }
         )
 
-        try:
-            api_key = st.secrets["OPENAI_API_KEY"]
+        found_key_name = None
+        for key_name in ["OPENAI_API_KEY", "LLM_API_KEY"]:
+            try:
+                candidate = st.secrets[key_name]
+                if candidate and str(candidate).strip():
+                    found_key_name = key_name
+                    break
+            except Exception:
+                pass
+
+        if found_key_name:
+            api_key = st.secrets[found_key_name]
             masked = f"{str(api_key)[:7]}...{str(api_key)[-4:]}" if len(str(api_key)) >= 12 else "vorhanden"
-            st.success(f"OPENAI_API_KEY gefunden: {masked}", icon="✅")
-        except Exception as e:
-            st.error(f"OPENAI_API_KEY fehlt: {e}", icon="🚨")
+            st.success(f"{found_key_name} gefunden: {masked}", icon="✅")
+        else:
+            st.error("Kein API-Key gefunden. Erwartet wird OPENAI_API_KEY oder LLM_API_KEY.", icon="🚨")
 
         if st.session_state.last_llm_status:
             st.info(st.session_state.last_llm_status)
@@ -533,6 +576,10 @@ def render_debug_sidebar():
         if st.session_state.last_llm_raw_reply:
             st.write("Letzte rohe Modellantwort:")
             st.code(st.session_state.last_llm_raw_reply)
+
+        if st.session_state.last_prompt_excerpt:
+            st.write("Letzter Prompt-Ausschnitt:")
+            st.code(st.session_state.last_prompt_excerpt)
 
 
 init_state()
@@ -580,7 +627,6 @@ Hilfreich ist, wenn du dein Thema kurz so beschreibst, dass der Chat deine Situa
             log_message("assistant", intro_msg)
             st.session_state.phase = "chat"
             st.rerun()
-
 
 elif st.session_state.phase == "chat":
     st.subheader(f"Reflexion zum Thema: {st.session_state.topic}")
@@ -643,9 +689,8 @@ elif st.session_state.phase == "chat":
 
         st.session_state.messages.append({"role": "assistant", "content": reply})
         log_message("assistant", reply)
-
+        st.session_state.turn += 1
         st.rerun()
-
 
 elif st.session_state.phase == "finished":
     write_summary_once()
@@ -698,6 +743,7 @@ elif st.session_state.phase == "finished":
                 "last_llm_error",
                 "last_llm_raw_reply",
                 "last_llm_status",
+                "last_prompt_excerpt",
             ]:
                 if key in st.session_state:
                     del st.session_state[key]
