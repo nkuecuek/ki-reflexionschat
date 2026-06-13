@@ -919,6 +919,114 @@ elif st.session_state.phase == "chat":
 
         st.rerun()
 
+elif st.session_state.phase == "chat":
+    st.subheader(f"Reflexion zum Thema: {st.session_state.topic}")
+    st.write(f"Nachricht {st.session_state.turn + 1} von {st.session_state.max_rounds}")
+
+    for msg in st.session_state.messages:
+        with st.chat_message(msg["role"]):
+            st.write(msg["content"])
+
+    if st.session_state.pending_finish:
+        st.session_state.phase = "closing"
+        st.rerun()
+
+    if st.session_state.turn >= st.session_state.max_rounds and not st.session_state.pending_finish:
+        st.session_state.chat_completed = True
+        st.session_state.pending_finish = True
+        st.rerun()
+
+    user_input = st.chat_input("Schreibe hier deine Antwort …")
+
+    if user_input:
+        if check_safety(user_input):
+            st.session_state.safety_triggered = True
+            st.session_state.messages.append({"role": "user", "content": user_input})
+            log_message("user", user_input)
+            st.session_state.user_messages_count += 1
+
+            safety_msg = (
+                "Dein Text enthält Hinweise auf starke Belastung oder eine mögliche Krisensituation. "
+                "Dieses KI-System kann in solchen Situationen keine Hilfe leisten. "
+                "Bitte wende dich jetzt an eine vertraute Person oder an professionelle Hilfe. "
+                "Bei akuter Gefahr rufe bitte den Notruf 112 an. "
+                "Wenn du mit jemandem sprechen möchtest, kannst du dich zum Beispiel an die TelefonSeelsorge "
+                "oder an die psychologische Beratungsstelle deiner Hochschule wenden. "
+                "Du kannst die Teilnahme hier beenden."
+            )
+            st.session_state.messages.append({"role": "assistant", "content": safety_msg})
+            log_message("assistant", safety_msg)
+
+            st.session_state.phase = "safety"
+            st.rerun()
+
+        st.session_state.messages.append({"role": "user", "content": user_input})
+        log_message("user", user_input)
+        st.session_state.user_messages_count += 1
+
+        with st.chat_message("assistant"):
+            with st.spinner("Antwort wird erzeugt …"):
+                is_last_turn = st.session_state.turn >= st.session_state.max_rounds - 1
+
+                if is_last_turn:
+                    reply = generate_closing_reply(
+                        user_text=user_input,
+                        cond=st.session_state.cond,
+                        topic=st.session_state.topic,
+                        turn=st.session_state.turn + 1,
+                        max_rounds=st.session_state.max_rounds,
+                    )
+                else:
+                    reply = generate_llm_reply(
+                        user_text=user_input,
+                        cond=st.session_state.cond,
+                        topic=st.session_state.topic,
+                        turn=st.session_state.turn + 1,
+                        max_rounds=st.session_state.max_rounds,
+                    )
+
+                st.write(reply)
+
+        st.session_state.messages.append({"role": "assistant", "content": reply})
+        log_message("assistant", reply)
+        st.session_state.turn += 1
+
+        if is_last_turn:
+            st.session_state.chat_completed = True
+            st.session_state.closing_logged = True
+            st.session_state.pending_finish = True
+
+        st.rerun()
+
+elif st.session_state.phase == "closing":
+    # Zeigt den vollständigen Chat inkl. letzter KI-Antwort,
+    # bevor zur finished-Seite weitergeleitet wird.
+    st.subheader(f"Reflexion zum Thema: {st.session_state.topic}")
+
+    for msg in st.session_state.messages:
+        with st.chat_message(msg["role"]):
+            st.write(msg["content"])
+
+    st.info("Die Reflexion ist abgeschlossen. Bitte klicke unten, um zum Fragebogen weiterzugehen.")
+
+    if st.button("Weiter zum Fragebogen", type="primary"):
+        st.session_state.phase = "finished"
+        st.rerun()
+
+elif st.session_state.phase == "safety":
+    for msg in st.session_state.messages:
+        with st.chat_message(msg["role"]):
+            st.write(msg["content"])
+
+    st.warning(
+        "Diese Reflexionssitzung wird jetzt beendet. "
+        "Bitte wende dich bei Bedarf an eine der genannten Stellen."
+    )
+
+    if st.button("Sitzung beenden", type="primary"):
+        st.session_state.phase = "finished"
+        st.rerun()
+
 elif st.session_state.phase == "finished":
     write_summary_once()
     st.success("Der Chatteil ist beendet.")
