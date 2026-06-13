@@ -343,6 +343,7 @@ def init_state():
         "chat_completed": False,
         "safety_triggered": False,
         "closing_logged": False,
+        "pending_finish": False,
         "user_messages_count": 0,
         "validation_fail_count": 0,
         "fallback_count": 0,
@@ -423,6 +424,9 @@ ZIEL DER INTERAKTION
 - Du hilfst ausschließlich dabei, allgemeine oder diffuse Beschreibungen in konkretere Beobachtungen, Situationen oder Abläufe zu überführen.
 - Du veränderst nicht das Thema, interpretierst nicht und entwickelst keine Theorie über die Person.
 - Du stellst keine Zusammenhänge her, die nicht ausdrücklich genannt oder klar angelegt wurden.
+- Du bleibst möglichst auf derselben Bedeutungsebene wie die Aussage der Person.
+- Du analysierst die Aussage nicht von außen, sondern formulierst näher an der subjektiven Beschreibung als an einer objektiven Einordnung.
+- Du kommentierst die Kommunikation mit dem KI-System nicht analytisch als eigenes Thema.
 
 GRUNDREGEL FÜR JEDE ANTWORT
 Jede Antwort besteht aus genau drei Teilen in dieser Reihenfolge:
@@ -492,6 +496,11 @@ UMGANG MIT KURZEN ODER UNKLAREN ANTWORTEN
 - Greife in solchen Fällen ausschließlich die konkrete Aussage auf.
 - Stelle keine Verbindung zu früheren Nachrichten her, wenn diese Verbindung nicht deutlich angelegt ist.
 - Stelle eine einfache Frage, die an den nächsten beobachtbaren Moment, Ablauf oder Gedanken anschließt.
+
+UMGANG MIT SCHWIERIGKEITEN IN DER INTERAKTION
+- Wenn die Person Unsicherheit, Frustration oder Schwierigkeiten mit dem Chat äußert, greif diese Schwierigkeit direkt auf.
+- Analysiere dabei nicht die Gesprächsdynamik und sprich nicht über "die Kommunikation" oder "die Rückmeldung" als abstraktes Thema.
+- Bleibe bei dem konkret genannten Problem oder Moment.
 
 SPRACHE
 - Formuliere einfach, kurz und alltagsnah.
@@ -783,6 +792,7 @@ def render_debug_sidebar():
                 "rounds": st.session_state.max_rounds,
                 "turn": st.session_state.turn,
                 "phase": st.session_state.phase,
+                "pending_finish": st.session_state.pending_finish,
                 "session_id": st.session_state.session_id,
                 "model": get_model_name(),
                 "validation_fail_count": st.session_state.validation_fail_count,
@@ -873,9 +883,13 @@ elif st.session_state.phase == "chat":
         with st.chat_message(msg["role"]):
             st.write(msg["content"])
 
-    if st.session_state.turn >= st.session_state.max_rounds:
-        st.session_state.chat_completed = True
+    if st.session_state.pending_finish:
         st.session_state.phase = "finished"
+        st.rerun()
+
+    if st.session_state.turn >= st.session_state.max_rounds and not st.session_state.pending_finish:
+        st.session_state.chat_completed = True
+        st.session_state.pending_finish = True
         st.rerun()
 
     user_input = st.chat_input("Schreibe hier deine Antwort …")
@@ -888,9 +902,11 @@ elif st.session_state.phase == "chat":
             st.session_state.user_messages_count += 1
 
             safety_msg = (
-                "Dein Text enthält Hinweise auf starke Belastung oder mögliche Krisensituationen. "
+                "Dein Text enthält Hinweise auf starke Belastung oder eine mögliche Krisensituation. "
                 "Dieses KI-System kann in solchen Situationen keine Hilfe leisten. "
-                "Bitte wende dich an vertraute Personen oder professionelle Hilfsangebote, zum Beispiel eine psychologische Beratungsstelle, die Telefonseelsorge oder bei akuter Gefahr den Notruf 112. "
+                "Bitte wende dich jetzt an eine vertraute Person oder an professionelle Hilfe. "
+                "Bei akuter Gefahr rufe bitte den Notruf 112 an. "
+                "Wenn du mit jemandem sprechen möchtest, kannst du dich zum Beispiel an die TelefonSeelsorge oder an die psychologische Beratungsstelle deiner Hochschule wenden. "
                 "Du kannst die Teilnahme hier beenden."
             )
             st.session_state.messages.append({"role": "assistant", "content": safety_msg})
@@ -933,7 +949,7 @@ elif st.session_state.phase == "chat":
         if is_last_turn:
             st.session_state.chat_completed = True
             st.session_state.closing_logged = True
-            st.session_state.phase = "finished"
+            st.session_state.pending_finish = True
 
         st.rerun()
 
@@ -984,6 +1000,7 @@ elif st.session_state.phase == "finished":
                 "topic",
                 "safety_triggered",
                 "closing_logged",
+                "pending_finish",
                 "user_messages_count",
                 "validation_fail_count",
                 "fallback_count",
