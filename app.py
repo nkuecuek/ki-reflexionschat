@@ -541,17 +541,17 @@ FORMATREGELN
     low_style = """
 STILREGELN FÜR DIE LOW-BEDINGUNG
 - Formuliere neutral, einfach und sachlich.
-- Beziehe dich stärker auf das Thema oder die beschriebene Situation als auf die Person.
+- Beziehe dich eher auf die beschriebene Situation als direkt auf die Person.
 - Vermeide direkte Du-Ansprache möglichst.
 - Klinge funktional und klar.
 - Klinge nicht emotional, aber auch nicht akademisch.
-- Verwende keine künstlich formalen Formulierungen.
+- Vermeide wiederkehrende Standardformulierungen.
 
 Bevorzugte Formulierungsarten:
-- "Hier wird beschrieben, dass ..."
-- "Im Moment geht es um ..."
-- "Hier wird genannt, dass ..."
+- "Es geht gerade darum, dass ..."
 - "Der konkrete Punkt ist hier ..."
+- "In der Beschreibung geht es um ..."
+- "Der schwierige Moment scheint der Punkt zu sein, an dem ..."
 """
 
     high_style = """
@@ -616,7 +616,7 @@ HIGH-BEDINGUNG
     return base + "\n" + low_style
 
 
-def get_recent_context(messages: List[Dict[str, str]], max_items: int = 1) -> str:
+def get_recent_context(messages: List[Dict[str, str]], max_items: int = 2) -> str:
     history = []
     for msg in messages:
         if msg["role"] in {"user", "assistant"}:
@@ -633,7 +633,7 @@ def build_api_messages(
     max_rounds: int,
     user_text: str
 ) -> List[Dict[str, str]]:
-    recent_context = get_recent_context(st.session_state.messages, max_items=1)
+    recent_context = get_recent_context(st.session_state.messages, max_items=2)
 
     user_payload = (
         f"Studienbezogenes Hauptthema der Person: {topic}\n"
