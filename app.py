@@ -77,10 +77,6 @@ PSYCH_TERMS = [
     "vermeidungsmuster",
     "symptom",
     "störung", "stoerung",
-    "überforderung", "ueberforderung",
-    "stressreaktion",
-    "innerer konflikt",
-    "körperliche reaktion", "koerperliche reaktion",
 ]
 
 INTRO_TEXT = """
@@ -229,7 +225,7 @@ def validate_response(text: str) -> bool:
         return False
 
     words = normalized.split()
-    if len(words) < 10 or len(words) > 70:
+    if len(words) < 10 or len(words) > 80:
         return False
 
     lower = normalized.lower()
@@ -248,9 +244,6 @@ def validate_response(text: str) -> bool:
         return False
 
     if normalized.startswith(tuple(QUESTION_START_WORDS)):
-        return False
-
-    if "." not in normalized and "," not in normalized:
         return False
 
     if starts_like_previous_assistant(normalized):
@@ -297,27 +290,27 @@ def fallback_reply(cond: str, user_text: str = "") -> str:
 
     if short in unsure_forms or is_very_short_user_input(user_text):
         variants_high = [
-            "Im Moment bleibt noch offen, woran du dieses studienbezogene Thema zuerst festmachst. Was fällt dir daran als Erstes auf?",
-            "Gerade ist noch schwer zu greifen, an welchem Punkt dein studienbezogenes Thema konkret beginnt. Was taucht dazu zuerst auf?",
-            "Noch ist nicht klar, welcher Teil deines studienbezogenen Themas im Moment am ehesten greifbar wird. Was bemerkst du daran zuerst?",
+            "Im Moment bleibt noch offen, woran du dieses studienbezogene Thema zuerst festmachst. Wenn du an den Anfang denkst, was fällt dir dort als Erstes auf?",
+            "Gerade ist noch schwer zu greifen, an welchem Punkt dein studienbezogenes Thema konkret beginnt. Wenn du an diese Situation denkst, was ist zuerst bemerkbar?",
+            "Noch ist nicht klar, welcher Teil deines studienbezogenen Themas im Moment am ehesten greifbar wird. Wenn du an den Anfang denkst, was taucht zuerst auf?",
         ]
         variants_low = [
-            "Im Moment bleibt noch unklar, welcher konkrete Punkt an diesem studienbezogenen Thema zuerst greifbar wird. Was fällt dazu als Erstes auf?",
-            "Noch ist offen, an welchem Punkt dieses studienbezogene Thema im Alltag zuerst sichtbar wird. Was lässt sich daran als Erstes benennen?",
-            "Der erste konkrete Ansatzpunkt in diesem studienbezogenen Thema bleibt noch unscharf. Was fällt dazu im Moment zuerst auf?",
+            "Im Moment bleibt noch unklar, welcher konkrete Punkt an diesem studienbezogenen Thema zuerst greifbar wird. Wenn du an die Situation denkst, was fällt als Erstes auf?",
+            "Noch ist offen, an welchem Punkt dieses studienbezogene Thema im Alltag zuerst sichtbar wird. Wenn du an den Anfang denkst, was lässt sich zuerst benennen?",
+            "Der erste konkrete Ansatzpunkt in diesem studienbezogenen Thema bleibt noch unscharf. Was fällt dir an dieser Situation zuerst auf?",
         ]
         pool = variants_high if cond == "high" else variants_low
         return pool[st.session_state.turn % len(pool)]
 
     variants_high = [
-        "Mehrere Punkte rund um dein studienbezogenes Thema stehen gerade nebeneinander. Was zeigt sich davon im Alltag am deutlichsten?",
-        "In deiner Beschreibung laufen gerade verschiedene studienbezogene Punkte zusammen. Was tritt davon im Moment am stärksten hervor?",
-        "Gerade kommen mehrere Aspekte deines studienbezogenen Themas gleichzeitig vor. Was fällt darunter im Alltag am meisten auf?",
+        "Mehrere Punkte rund um dein studienbezogenes Thema stehen gerade nebeneinander. Wenn du an die aktuelle Situation denkst, was tritt zuerst hervor?",
+        "In deiner Beschreibung laufen gerade verschiedene studienbezogene Punkte zusammen. Wenn du an diesen Moment denkst, was ist am deutlichsten bemerkbar?",
+        "Gerade kommen mehrere Aspekte deines studienbezogenen Themas gleichzeitig vor. Was fällt in dieser Situation zuerst auf?",
     ]
     variants_low = [
-        "Mehrere Punkte rund um das studienbezogene Thema werden hier gleichzeitig beschrieben. Was zeigt sich davon im Alltag am deutlichsten?",
-        "In der Beschreibung laufen verschiedene Aspekte des studienbezogenen Themas zusammen. Was tritt davon im Moment am stärksten hervor?",
-        "Hier werden mehrere studienbezogene Punkte nebeneinander sichtbar. Was fällt darunter im Alltag am meisten auf?",
+        "Mehrere Punkte rund um das studienbezogene Thema werden hier gleichzeitig beschrieben. Wenn du an die aktuelle Situation denkst, was tritt zuerst hervor?",
+        "In der Beschreibung laufen verschiedene Aspekte des studienbezogenen Themas zusammen. Was ist in diesem Moment am deutlichsten bemerkbar?",
+        "Hier werden mehrere studienbezogene Punkte nebeneinander sichtbar. Was fällt in dieser Situation zuerst auf?",
     ]
     pool = variants_high if cond == "high" else variants_low
     return pool[st.session_state.turn % len(pool)]
@@ -325,17 +318,14 @@ def fallback_reply(cond: str, user_text: str = "") -> str:
 
 def closing_fallback(cond: str) -> str:
     if cond == "high":
-        variants = [
-            "Du hast dein studienbezogenes Thema in dieser kurzen Reflexion weiter beschrieben und einzelne Punkte klarer benannt. Damit endet die Reflexion zu deinem Thema.",
-            "In dieser kurzen Reflexion hast du dein studienbezogenes Thema weiter eingegrenzt und konkreter beschrieben. Damit endet die Reflexion zu deinem Thema.",
-        ]
-        return variants[st.session_state.turn % len(variants)]
-
-    variants = [
-        "Das studienbezogene Thema wurde in dieser kurzen Reflexion weiter beschrieben und durch konkrete Punkte eingegrenzt. Damit endet die Reflexion zu diesem Thema.",
-        "In dieser kurzen Reflexion wurde das studienbezogene Thema weiter präzisiert und anhand einzelner Punkte eingegrenzt. Damit endet die Reflexion zu diesem Thema.",
-    ]
-    return variants[st.session_state.turn % len(variants)]
+        return (
+            "Du hast dein studienbezogenes Thema in dieser kurzen Reflexion weiter beschrieben "
+            "und einige konkrete Punkte benannt. Damit endet die Reflexion zu deinem Thema."
+        )
+    return (
+        "Das studienbezogene Thema wurde in dieser kurzen Reflexion weiter beschrieben "
+        "und durch konkrete Punkte eingegrenzt. Damit endet die Reflexion zu diesem Thema."
+    )
 
 
 def check_safety(user_text: str) -> bool:
@@ -369,66 +359,44 @@ ZIEL DER INTERAKTION
 - Du kommentierst die Kommunikation mit dem KI-System nicht als eigenes Thema.
 
 GRUNDREGEL FÜR JEDE ANTWORT
-Jede Antwort besteht aus genau zwei Schritten:
-1. Du benennst in einem kurzen Satz einen klaren Fokus-Moment oder Abschnitt im Ablauf.
-2. Du stellst genau eine offene Frage, die sich direkt auf diesen benannten Moment bezieht.
+- Jede Antwort hat genau zwei Teile: 1) ein kurzer, eigener Fokus-Satz, 2) genau eine offene Frage.
+- Der Fokus-Satz greift genau einen greifbaren Moment, einen kleinen Ablauf oder eine unmittelbar sichtbare Situation auf.
+- Wiederhole die Eingabe nicht bloß mit anderen Worten und verwende keine feste Einleitungsformel in jeder Antwort.
+- Füge keine neuen Motive, Ursachen, Bewertungen oder psychologischen Deutungen hinzu.
+- Die Frage knüpft direkt an diesen Moment an und öffnet nur eine Facette weiter: Wahrnehmung, Ablauf, erster Gedanke, Körper oder Umgebung.
 
 REGEL FÜR DEN SATZANFANG
-- Der erste Satz darf nicht in mehreren Antworten nacheinander mit derselben Formulierung oder demselben Anfangsmuster beginnen.
 - Variiere den Einstieg sichtbar.
-- Verwende keine festen Standardstarter in Serie.
-- Vermeide insbesondere Wiederholungen wie:
-  "Du beschreibst gerade ..."
-  "Hier zeigt sich ..."
-  "Es geht gerade ..."
-  "Im Moment bleibt ..."
-  "Gerade ist noch ..."
-- Die Variation betrifft nur die sprachliche Oberfläche. Inhalt, Funktion und Kürze bleiben gleich.
+- Vermeide wiederkehrende Standardstarter wie "Du beschreibst gerade ...", "Hier zeigt sich ...", "Es geht gerade ...", "Im Moment bleibt ..." oder "Gerade ist noch ...".
+- Inhalt, Funktion und Kürze bleiben gleich; nur die sprachliche Oberfläche variiert.
 
-1. FOKUS-MOMENT BENENNEN
-- Wähle aus der letzten Eingabe genau einen Moment oder Abschnitt, der darin deutlich wird (z.B. der Moment direkt vor dem Start, das Sitzen am Computer, der Zeitpunkt nach einer E-Mail, der Gedanke kurz vor einer Prüfung).
+KONKRETISIERUNG DES FOKUS-SATZES
+- Wähle aus der letzten Eingabe genau einen Moment oder Abschnitt, der darin deutlich wird.
 - Formuliere diesen Moment in eigenen Worten, aber eng an der Beschreibung der Person.
-- Du wiederholst die Eingabe nicht wörtlich, sondern verdichtest sie zu einem klaren Fokuspunkt oder kurzen Ablaufstück.
-- Du fügst keine neuen Motive, Ursachen, Bewertungen oder psychologischen Deutungen hinzu.
 - Wenn die neue Eingabe erkennbar an einen vorherigen Punkt anknüpft, darfst du genau einen solchen früheren Punkt knapp mit erwähnen, aber du fasst nicht mehrere frühere Turns zusammen.
-- Sprich über die Situation oder den Moment, nicht über "die Aussage", "die Rückmeldung" oder "die Kommunikation".
+- Sprich über die Situation oder den Moment, nicht über „die Aussage“, „die Rückmeldung“ oder „die Kommunikation“.
 
-Erlaubt:
-- "Der schwierige Punkt liegt gerade im Moment vor dem Start deiner Thesis."
-- "Im Vordergrund steht hier der Augenblick am Computer, in dem noch kein Anfang greifbar ist."
-- "Zunächst geht es um die Abende, an denen du lange wach liegst und an das Studium denkst."
-
-Nicht erlaubt:
-- "Es zeigt sich, dass du stark überfordert bist."
-- "Das deutet darauf hin, dass eine tieferliegende Angst vor Versagen besteht."
-- "Die Rückmeldung macht deutlich, dass die Kommunikation mit dem Chat schwierig ist."
-
-2. FRAGE AN DIESEN MOMENT ANDOCKEN
+FRAGEREGEL
 - Stelle genau eine offene Frage.
 - Die Frage steht am Ende der Antwort.
 - Die Frage beginnt nur mit "Was" oder "Wie".
-- Die Frage knüpft direkt an den benannten Moment oder Abschnitt an und enthält diesen Moment sprachlich wieder.
-- Die Frage soll leicht beantwortbar sein und sich auf Wahrnehmung, Ablauf oder unmittelbare Gedanken beziehen, nicht auf Lösungen oder Zukunftsplanung.
+- Die Frage soll leicht beantwortbar sein und sich auf Wahrnehmung, Ablauf, unmittelbare Gedanken, Körper oder Umgebung beziehen.
 - Sie führt keinen neuen Themenbereich ein.
 
-Beispiele:
-- "Wie sieht dieser Moment konkret aus, kurz bevor du anfangen würdest?"
-- "Was machst du meistens zuerst, wenn du an diesem Punkt noch keinen Anfang findest?"
-- "Wie läuft ein solcher Abend normalerweise ab, an dem du lange wach liegst und an das Studium denkst?"
-- "Was geht dir in diesem Moment als Erstes durch den Kopf?"
-
-Verbotene Frageformen:
+VERBOTENE FRAGEFORMEN
 - "Warum ..."
 - "Woran ..."
 - "Inwiefern ..."
+- "Welche ..."
+- "Wann ..."
+- "Wer ..."
+- "Was bedeutet das ..."
 - "Welche tieferen Gründe ..."
-- "Was bedeutet das für dich insgesamt ..."
 
 UMGANG MIT KURZEN ODER UNKLAREN ANTWORTEN
 - Auch sehr kurze Antworten wie "Ich weiß nicht", "Keine Ahnung" oder "gar nicht" sind ernst zu nehmen.
-- Benenne in der Spiegelung knapp, dass der Ansatzpunkt gerade noch schwer zu greifen ist.
+- Greife dann nur einen ersten kleinen Ansatzpunkt oder einen ersten greifbaren Moment auf.
 - Stelle eine kleine, konkrete Frage, die hilft, einen ersten Moment, eine kleine Situation oder einen ersten Gedanken sichtbar zu machen.
-- Du stellst keine Diagnose über das Feststecken und keine Deutung, warum es so ist.
 
 UMGANG MIT SCHWIERIGKEITEN IN DER INTERAKTION
 - Wenn die Person Unsicherheit, Frustration oder Schwierigkeiten mit dem Chat äußert, greife den benannten Inhalt direkt auf.
@@ -442,7 +410,7 @@ SPRACHE
 - Verwende keine tröstende Sprache und keine emotionale Resonanz.
 - Vermeide sichtbare Schablonen und wiederkehrende feste Satzanfänge.
 
-VERBOTENE FORMULIERUNGEN (BEISPIELE)
+VERBOTENE FORMULIERUNGEN
 - "Das klingt belastend."
 - "Ich kann verstehen, dass ..."
 - "Das muss schwer für dich sein."
@@ -459,9 +427,8 @@ FORMATREGELN
 - Deine Antwort ist genau ein zusammenhängender Fließtextabschnitt.
 - Du verwendest keine Bulletpoints, keine Listen und keine mehreren Absätze.
 - Deine Antwort enthält genau ein Fragezeichen.
-- Die Antwort umfasst ungefähr 15 bis 70 Wörter.
+- Die Antwort umfasst ungefähr 10 bis 80 Wörter.
 - Die Sitzung umfasst insgesamt {max_rounds} Nutzereingaben.
-- Die letzte Nutzereingabe wird mit einer kurzen Abschlussantwort ohne neue Frage beantwortet.
 """
 
     low_style = """
@@ -470,7 +437,6 @@ STILREGELN FÜR DIE LOW-BEDINGUNG
 - Direkte Du-Ansprache vermeidest du möglichst.
 - Die Sprache soll nüchtern wirken, aber trotzdem normal und flüssig klingen.
 - Klinge nicht mechanisch, nicht steif und nicht akademisch.
-- Verwende verschiedene neutrale Einstiegsformen statt immer derselben Schablone.
 """
 
     high_style = """
@@ -479,7 +445,6 @@ STILREGELN FÜR DIE HIGH-BEDINGUNG
 - Du darfst Du-Ansprache verwenden.
 - Die Sprache darf gesprächsnäher wirken, bleibt aber sachlich und nicht fürsorglich oder tröstend.
 - Klinge nicht locker, nicht casual und nicht emotionalisierend.
-- Verwende verschiedene natürliche Einstiegsformen statt immer derselben Schablone.
 """
 
     if cond == "high":
@@ -495,13 +460,13 @@ Dies ist die letzte Antwort der Reflexionsinteraktion (Runde {max_rounds} von {m
 
 AUFGABE
 - Formuliere eine kurze Abschlussantwort.
-- Greife den zuletzt genannten Punkt der Person knapp auf, nicht mehr als einen.
+- Greife den zuletzt genannten Punkt der Person knapp auf – nicht mehr als einen.
 - Füge keine neuen Inhalte, Deutungen, Ratschläge oder Zukunftsaussagen hinzu.
 - Stelle keine neue Frage.
 - Markiere klar, dass die Reflexion jetzt endet.
 
 VERBOTENE FORMULIERUNGEN
-- Keine Sätze wie "Das klingt belastend", "Ich bin für dich da", "Du hast das gut gemacht", "Das war mutig".
+- Keine Sätze wie „Das klingt belastend“, „Ich bin für dich da“, „Du hast das gut gemacht“, „Das war mutig“.
 - Keine Bewertungen der Person oder der Interaktion.
 - Keine therapeutische, tröstende oder beratende Sprache.
 - Alltagsnahe Begriffe wie Stress, Überforderung oder Druck darfst du aufgreifen, wenn die Person sie selbst verwendet hat.
@@ -518,14 +483,12 @@ FORMATREGELN
 STILREGELN – BEDINGUNG A (sachlich)
 - Sachlich, nüchtern, inhaltsbezogen.
 - Du-Ansprache möglich, aber sparsam einsetzen.
-- Formuliere knapp und klar.
 """
 
     high_style = """
 STILREGELN – BEDINGUNG B (natürlich)
 - Natürlich, leicht personenbezogen, aber nicht empathisch oder fürsorglich.
 - Du-Ansprache selbstverständlich.
-- Formuliere knapp, klar und gesprächsnah.
 """
 
     if cond == "high":
@@ -576,15 +539,13 @@ def build_api_messages(
         user_payload += (
             "Bisheriger Gesprächsverlauf (die letzten Schritte, User und Assistent abwechselnd). "
             "Beziehe dich primär auf die unmittelbar letzte Nutzereingabe. "
-            "Die früheren Schritte dienen nur als Hintergrund und dürfen nur sehr knapp aufgegriffen werden. "
-            "Fasse sie nicht zusammen:\n"
+            "Die früheren Schritte dienen nur als Hintergrund – fasse sie nicht zusammen:\n"
             f"{recent_context}\n"
         )
 
     user_payload += (
         f"Unmittelbar letzte Eingabe der Person: {user_text}\n"
-        "Formuliere jetzt genau eine Antwort gemäß allen Regeln. "
-        "Achte besonders darauf, den ersten Satz nicht mit demselben Muster wie in der vorherigen Assistentenantwort zu beginnen."
+        "Formuliere jetzt genau eine Antwort gemäß allen Regeln."
     )
 
     return [
@@ -619,8 +580,6 @@ def call_llm(
         messages=messages,
         temperature=temperature,
         max_tokens=180,
-        frequency_penalty=0.35,
-        presence_penalty=0.10,
     )
 
     content = response.choices[0].message.content
@@ -769,6 +728,7 @@ def init_state():
         "chat_completed": False,
         "safety_triggered": False,
         "closing_logged": False,
+        "pending_finish": False,
         "user_messages_count": 0,
         "validation_fail_count": 0,
         "fallback_count": 0,
@@ -843,6 +803,7 @@ def render_debug_sidebar():
                 "rounds": st.session_state.max_rounds,
                 "turn": st.session_state.turn,
                 "phase": st.session_state.phase,
+                "pending_finish": st.session_state.pending_finish,
                 "session_id": st.session_state.session_id,
                 "model": get_model_name(),
                 "validation_fail_count": st.session_state.validation_fail_count,
@@ -915,11 +876,7 @@ Hilfreich ist, wenn du dein Thema kurz so beschreibst, dass der Chat deine Situa
         if not validate_topic_input(topic):
             st.warning("Bitte beschreibe dein studienbezogenes Thema etwas genauer, bevor du die Reflexion startest.")
         else:
-            intro_msg = (
-                "Die Reflexion beginnt jetzt zu deinem studienbezogenen Thema. "
-                "Beschreibe zunächst, worum es dabei geht, welche Gedanken dich dazu beschäftigen "
-                "und warum das Thema im Moment relevant ist."
-            )
+            intro_msg = "Beschreibe, was dich an deinem Thema gerade beschäftigt."
             st.session_state.messages.append({"role": "assistant", "content": intro_msg})
             log_message("assistant", intro_msg)
             st.session_state.phase = "chat"
@@ -933,9 +890,13 @@ elif st.session_state.phase == "chat":
         with st.chat_message(msg["role"]):
             st.write(msg["content"])
 
-    if st.session_state.turn >= st.session_state.max_rounds:
+    if st.session_state.pending_finish:
+        st.session_state.phase = "closing"
+        st.rerun()
+
+    if st.session_state.turn >= st.session_state.max_rounds and not st.session_state.pending_finish:
         st.session_state.chat_completed = True
-        st.session_state.phase = "finished"
+        st.session_state.pending_finish = True
         st.rerun()
 
     user_input = st.chat_input("Schreibe hier deine Antwort …")
@@ -948,15 +909,18 @@ elif st.session_state.phase == "chat":
             st.session_state.user_messages_count += 1
 
             safety_msg = (
-                "Dein Text enthält Hinweise auf starke Belastung oder mögliche Krisensituationen. "
+                "Dein Text enthält Hinweise auf starke Belastung oder eine mögliche Krisensituation. "
                 "Dieses KI-System kann in solchen Situationen keine Hilfe leisten. "
-                "Bitte wende dich an vertraute Personen oder professionelle Hilfsangebote, zum Beispiel eine psychologische Beratungsstelle, die Telefonseelsorge oder bei akuter Gefahr den Notruf 112. "
+                "Bitte wende dich jetzt an eine vertraute Person oder an professionelle Hilfe. "
+                "Bei akuter Gefahr rufe bitte den Notruf 112 an. "
+                "Wenn du mit jemandem sprechen möchtest, kannst du dich zum Beispiel an die TelefonSeelsorge "
+                "oder an die psychologische Beratungsstelle deiner Hochschule wenden. "
                 "Du kannst die Teilnahme hier beenden."
             )
             st.session_state.messages.append({"role": "assistant", "content": safety_msg})
             log_message("assistant", safety_msg)
 
-            st.session_state.phase = "finished"
+            st.session_state.phase = "safety"
             st.rerun()
 
         st.session_state.messages.append({"role": "user", "content": user_input})
@@ -993,8 +957,35 @@ elif st.session_state.phase == "chat":
         if is_last_turn:
             st.session_state.chat_completed = True
             st.session_state.closing_logged = True
-            st.session_state.phase = "finished"
+            st.session_state.pending_finish = True
 
+        st.rerun()
+
+elif st.session_state.phase == "closing":
+    st.subheader(f"Reflexion zum Thema: {st.session_state.topic}")
+
+    for msg in st.session_state.messages:
+        with st.chat_message(msg["role"]):
+            st.write(msg["content"])
+
+    st.info("Die Reflexion ist abgeschlossen. Bitte klicke unten, um zum Fragebogen weiterzugehen.")
+
+    if st.button("Weiter zum Fragebogen", type="primary"):
+        st.session_state.phase = "finished"
+        st.rerun()
+
+elif st.session_state.phase == "safety":
+    for msg in st.session_state.messages:
+        with st.chat_message(msg["role"]):
+            st.write(msg["content"])
+
+    st.warning(
+        "Diese Reflexionssitzung wird jetzt beendet. "
+        "Bitte wende dich bei Bedarf an eine der genannten Stellen."
+    )
+
+    if st.button("Sitzung beenden", type="primary"):
+        st.session_state.phase = "finished"
         st.rerun()
 
 elif st.session_state.phase == "finished":
@@ -1044,6 +1035,7 @@ elif st.session_state.phase == "finished":
                 "topic",
                 "safety_triggered",
                 "closing_logged",
+                "pending_finish",
                 "user_messages_count",
                 "validation_fail_count",
                 "fallback_count",
