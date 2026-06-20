@@ -68,12 +68,19 @@ FORBIDDEN_QUESTION_STARTS = [
 ]
 
 PSYCH_TERMS = [
-    "depression", "depressiv", "angststörung", "angststoerung",
-    "trauma", "symptom", "diagnose", "störung", "stoerung",
-    "psychodynamisch", "vermeidungsmuster", "bindungsstil",
-    "perfektionismus", "innerer konflikt", "überforderung",
-    "ueberforderung", "stressreaktion", "körperliche reaktion",
-    "koerperliche reaktion"
+    "depression", "depressiv",
+    "angststörung", "angststoerung",
+    "trauma", "traumatisch",
+    "diagnose",
+    "psychodynamisch",
+    "bindungsstil",
+    "vermeidungsmuster",
+    "symptom",
+    "störung", "stoerung",
+    "überforderung", "ueberforderung",
+    "stressreaktion",
+    "innerer konflikt",
+    "körperliche reaktion", "koerperliche reaktion",
 ]
 
 INTRO_TEXT = """
@@ -178,6 +185,32 @@ def extract_question_part(normalized: str) -> str:
     return before_q
 
 
+def starts_like_previous_assistant(text: str) -> bool:
+    assistant_messages = [
+        msg["content"].strip()
+        for msg in st.session_state.messages
+        if msg["role"] == "assistant" and msg["content"].strip()
+    ]
+    if not assistant_messages:
+        return False
+
+    last_assistant = assistant_messages[-1]
+    current_words = text.strip().split()
+    previous_words = last_assistant.strip().split()
+
+    if len(current_words) < 2 or len(previous_words) < 2:
+        return False
+
+    current_start_2 = " ".join(current_words[:2]).lower()
+    previous_start_2 = " ".join(previous_words[:2]).lower()
+    current_start_3 = " ".join(current_words[:3]).lower() if len(current_words) >= 3 else ""
+    previous_start_3 = " ".join(previous_words[:3]).lower() if len(previous_words) >= 3 else ""
+
+    return current_start_2 == previous_start_2 or (
+        current_start_3 and previous_start_3 and current_start_3 == previous_start_3
+    )
+
+
 def validate_response(text: str) -> bool:
     if not text:
         return False
@@ -196,7 +229,7 @@ def validate_response(text: str) -> bool:
         return False
 
     words = normalized.split()
-    if len(words) < 10 or len(words) > 80:
+    if len(words) < 10 or len(words) > 70:
         return False
 
     lower = normalized.lower()
@@ -214,7 +247,13 @@ def validate_response(text: str) -> bool:
     if any(question_part.startswith(prefix) for prefix in FORBIDDEN_QUESTION_STARTS):
         return False
 
+    if normalized.startswith(tuple(QUESTION_START_WORDS)):
+        return False
+
     if "." not in normalized and "," not in normalized:
+        return False
+
+    if starts_like_previous_assistant(normalized):
         return False
 
     return True
@@ -257,43 +296,430 @@ def fallback_reply(cond: str, user_text: str = "") -> str:
     }
 
     if short in unsure_forms or is_very_short_user_input(user_text):
-        if cond == "high":
-            return (
-                "Gerade bleibt noch unklar, woran du dein studienbezogenes Thema am ehesten festmachst. "
-                "Was fällt dir daran im Moment als Erstes auf?"
-            )
-        return (
-            "Im Moment bleibt noch unklar, welcher konkrete Punkt an diesem studienbezogenen Thema zuerst greifbar wird. "
-            "Was fällt dazu als Erstes auf?"
-        )
+        variants_high = [
+            "Im Moment bleibt noch offen, woran du dieses studienbezogene Thema zuerst festmachst. Was fällt dir daran als Erstes auf?",
+            "Gerade ist noch schwer zu greifen, an welchem Punkt dein studienbezogenes Thema konkret beginnt. Was taucht dazu zuerst auf?",
+            "Noch ist nicht klar, welcher Teil deines studienbezogenen Themas im Moment am ehesten greifbar wird. Was bemerkst du daran zuerst?",
+        ]
+        variants_low = [
+            "Im Moment bleibt noch unklar, welcher konkrete Punkt an diesem studienbezogenen Thema zuerst greifbar wird. Was fällt dazu als Erstes auf?",
+            "Noch ist offen, an welchem Punkt dieses studienbezogene Thema im Alltag zuerst sichtbar wird. Was lässt sich daran als Erstes benennen?",
+            "Der erste konkrete Ansatzpunkt in diesem studienbezogenen Thema bleibt noch unscharf. Was fällt dazu im Moment zuerst auf?",
+        ]
+        pool = variants_high if cond == "high" else variants_low
+        return pool[st.session_state.turn % len(pool)]
 
-    if cond == "high":
-        return (
-            "Du beschreibst gerade mehrere Punkte rund um dein studienbezogenes Thema. "
-            "Was zeigt sich davon im Alltag im Moment am deutlichsten?"
-        )
-    return (
-        "Hier werden mehrere Punkte rund um das studienbezogene Thema beschrieben. "
-        "Was zeigt sich davon im Alltag im Moment am deutlichsten?"
-    )
+    variants_high = [
+        "Mehrere Punkte rund um dein studienbezogenes Thema stehen gerade nebeneinander. Was zeigt sich davon im Alltag am deutlichsten?",
+        "In deiner Beschreibung laufen gerade verschiedene studienbezogene Punkte zusammen. Was tritt davon im Moment am stärksten hervor?",
+        "Gerade kommen mehrere Aspekte deines studienbezogenen Themas gleichzeitig vor. Was fällt darunter im Alltag am meisten auf?",
+    ]
+    variants_low = [
+        "Mehrere Punkte rund um das studienbezogene Thema werden hier gleichzeitig beschrieben. Was zeigt sich davon im Alltag am deutlichsten?",
+        "In der Beschreibung laufen verschiedene Aspekte des studienbezogenen Themas zusammen. Was tritt davon im Moment am stärksten hervor?",
+        "Hier werden mehrere studienbezogene Punkte nebeneinander sichtbar. Was fällt darunter im Alltag am meisten auf?",
+    ]
+    pool = variants_high if cond == "high" else variants_low
+    return pool[st.session_state.turn % len(pool)]
 
 
 def closing_fallback(cond: str) -> str:
     if cond == "high":
-        return (
-            "Du hast den zuletzt sichtbaren Schwerpunkt in dieser kurzen Reflexion aufgegriffen. "
-            "Damit endet die Reflexion zu deinem Thema."
-        )
-    return (
-        "Der zuletzt sichtbare Schwerpunkt wurde in dieser kurzen Reflexion aufgegriffen. "
-        "Damit endet die Reflexion zu diesem Thema."
-    )
+        variants = [
+            "Du hast dein studienbezogenes Thema in dieser kurzen Reflexion weiter beschrieben und einzelne Punkte klarer benannt. Damit endet die Reflexion zu deinem Thema.",
+            "In dieser kurzen Reflexion hast du dein studienbezogenes Thema weiter eingegrenzt und konkreter beschrieben. Damit endet die Reflexion zu deinem Thema.",
+        ]
+        return variants[st.session_state.turn % len(variants)]
+
+    variants = [
+        "Das studienbezogene Thema wurde in dieser kurzen Reflexion weiter beschrieben und durch konkrete Punkte eingegrenzt. Damit endet die Reflexion zu diesem Thema.",
+        "In dieser kurzen Reflexion wurde das studienbezogene Thema weiter präzisiert und anhand einzelner Punkte eingegrenzt. Damit endet die Reflexion zu diesem Thema.",
+    ]
+    return variants[st.session_state.turn % len(variants)]
 
 
 def check_safety(user_text: str) -> bool:
     text = (user_text or "").lower()
     text = text.translate(str.maketrans("", "", string.punctuation))
     return any(kw in text for kw in SAFETY_KEYWORDS)
+
+
+def build_system_prompt(cond: str, max_rounds: int) -> str:
+    base = f"""
+Du bist ein KI-basiertes Reflexionstool im Rahmen einer kurzen psychologischen Studie im Hochschulkontext.
+
+ROLLE UND GRENZEN
+- Du bist ein transparentes KI-System und keine menschliche Person.
+- Du ersetzt keine Therapie, kein Coaching und keine Beratung.
+- Du gibst keine Lösungen, keine Handlungsempfehlungen und keine Ziele vor.
+- Du stellst keine Diagnosen, erklärst keine psychologischen Modelle und verwendest keine psychologischen Fachbegriffe.
+- Du simulierst keine menschliche Beziehung, keine Empathie und keine emotionale Begleitung.
+
+THEMENRAHMEN
+- Die Person schreibt über ein studienbezogenes Anliegen, zum Beispiel Prüfungsdruck, Abschlussarbeit, Motivation, Zeitmanagement, Unsicherheit im Studium oder Konflikte im Hochschulkontext.
+- Wenn andere Lebensbereiche erwähnt werden, darfst du sie nur kurz aufgreifen, sofern die Person sie selbst genannt hat.
+- Der Schwerpunkt bleibt beim studienbezogenen Thema.
+
+ZIEL DER INTERAKTION
+- Deine Funktion ist minimale kognitive Strukturierung.
+- Du hilfst dabei, allgemeine oder diffuse Beschreibungen in konkretere Beobachtungen, Situationen oder Abläufe zu überführen.
+- Du veränderst das Thema nicht, interpretierst nicht und entwickelst keine Theorie über die Person.
+- Du bleibst möglichst auf derselben Bedeutungsebene wie die Aussage der Person.
+- Du formulierst näher an der subjektiven Beschreibung als an einer analytischen Einordnung.
+- Du kommentierst die Kommunikation mit dem KI-System nicht als eigenes Thema.
+
+GRUNDREGEL FÜR JEDE ANTWORT
+Jede Antwort besteht aus genau zwei Schritten:
+1. Du benennst in einem kurzen Satz einen klaren Fokus-Moment oder Abschnitt im Ablauf.
+2. Du stellst genau eine offene Frage, die sich direkt auf diesen benannten Moment bezieht.
+
+REGEL FÜR DEN SATZANFANG
+- Der erste Satz darf nicht in mehreren Antworten nacheinander mit derselben Formulierung oder demselben Anfangsmuster beginnen.
+- Variiere den Einstieg sichtbar.
+- Verwende keine festen Standardstarter in Serie.
+- Vermeide insbesondere Wiederholungen wie:
+  "Du beschreibst gerade ..."
+  "Hier zeigt sich ..."
+  "Es geht gerade ..."
+  "Im Moment bleibt ..."
+  "Gerade ist noch ..."
+- Die Variation betrifft nur die sprachliche Oberfläche. Inhalt, Funktion und Kürze bleiben gleich.
+
+1. FOKUS-MOMENT BENENNEN
+- Wähle aus der letzten Eingabe genau einen Moment oder Abschnitt, der darin deutlich wird (z.B. der Moment direkt vor dem Start, das Sitzen am Computer, der Zeitpunkt nach einer E-Mail, der Gedanke kurz vor einer Prüfung).
+- Formuliere diesen Moment in eigenen Worten, aber eng an der Beschreibung der Person.
+- Du wiederholst die Eingabe nicht wörtlich, sondern verdichtest sie zu einem klaren Fokuspunkt oder kurzen Ablaufstück.
+- Du fügst keine neuen Motive, Ursachen, Bewertungen oder psychologischen Deutungen hinzu.
+- Wenn die neue Eingabe erkennbar an einen vorherigen Punkt anknüpft, darfst du genau einen solchen früheren Punkt knapp mit erwähnen, aber du fasst nicht mehrere frühere Turns zusammen.
+- Sprich über die Situation oder den Moment, nicht über "die Aussage", "die Rückmeldung" oder "die Kommunikation".
+
+Erlaubt:
+- "Der schwierige Punkt liegt gerade im Moment vor dem Start deiner Thesis."
+- "Im Vordergrund steht hier der Augenblick am Computer, in dem noch kein Anfang greifbar ist."
+- "Zunächst geht es um die Abende, an denen du lange wach liegst und an das Studium denkst."
+
+Nicht erlaubt:
+- "Es zeigt sich, dass du stark überfordert bist."
+- "Das deutet darauf hin, dass eine tieferliegende Angst vor Versagen besteht."
+- "Die Rückmeldung macht deutlich, dass die Kommunikation mit dem Chat schwierig ist."
+
+2. FRAGE AN DIESEN MOMENT ANDOCKEN
+- Stelle genau eine offene Frage.
+- Die Frage steht am Ende der Antwort.
+- Die Frage beginnt nur mit "Was" oder "Wie".
+- Die Frage knüpft direkt an den benannten Moment oder Abschnitt an und enthält diesen Moment sprachlich wieder.
+- Die Frage soll leicht beantwortbar sein und sich auf Wahrnehmung, Ablauf oder unmittelbare Gedanken beziehen, nicht auf Lösungen oder Zukunftsplanung.
+- Sie führt keinen neuen Themenbereich ein.
+
+Beispiele:
+- "Wie sieht dieser Moment konkret aus, kurz bevor du anfangen würdest?"
+- "Was machst du meistens zuerst, wenn du an diesem Punkt noch keinen Anfang findest?"
+- "Wie läuft ein solcher Abend normalerweise ab, an dem du lange wach liegst und an das Studium denkst?"
+- "Was geht dir in diesem Moment als Erstes durch den Kopf?"
+
+Verbotene Frageformen:
+- "Warum ..."
+- "Woran ..."
+- "Inwiefern ..."
+- "Welche tieferen Gründe ..."
+- "Was bedeutet das für dich insgesamt ..."
+
+UMGANG MIT KURZEN ODER UNKLAREN ANTWORTEN
+- Auch sehr kurze Antworten wie "Ich weiß nicht", "Keine Ahnung" oder "gar nicht" sind ernst zu nehmen.
+- Benenne in der Spiegelung knapp, dass der Ansatzpunkt gerade noch schwer zu greifen ist.
+- Stelle eine kleine, konkrete Frage, die hilft, einen ersten Moment, eine kleine Situation oder einen ersten Gedanken sichtbar zu machen.
+- Du stellst keine Diagnose über das Feststecken und keine Deutung, warum es so ist.
+
+UMGANG MIT SCHWIERIGKEITEN IN DER INTERAKTION
+- Wenn die Person Unsicherheit, Frustration oder Schwierigkeiten mit dem Chat äußert, greife den benannten Inhalt direkt auf.
+- Formuliere eine Frage, die hilft, einen konkreten Punkt zu finden, an dem weiter reflektiert werden kann.
+- Analysiere nicht die gesamte Gesprächsdynamik.
+
+SPRACHE
+- Formuliere einfach, kurz und alltagsnah.
+- Klinge nicht wie ein wissenschaftlicher Text.
+- Klinge nicht wie eine Therapeutin, ein Coach oder ein psychologischer Berater.
+- Verwende keine tröstende Sprache und keine emotionale Resonanz.
+- Vermeide sichtbare Schablonen und wiederkehrende feste Satzanfänge.
+
+VERBOTENE FORMULIERUNGEN (BEISPIELE)
+- "Das klingt belastend."
+- "Ich kann verstehen, dass ..."
+- "Das muss schwer für dich sein."
+- "Vielleicht steckt dahinter ..."
+- "Es könnte sein, dass ..."
+- "Vermutlich ..."
+- "Ich bin für dich da."
+- "Danke für dein Vertrauen."
+- "Du bist nicht allein."
+- "Ich begleite dich."
+
+FORMATREGELN
+- Du antwortest auf Deutsch.
+- Deine Antwort ist genau ein zusammenhängender Fließtextabschnitt.
+- Du verwendest keine Bulletpoints, keine Listen und keine mehreren Absätze.
+- Deine Antwort enthält genau ein Fragezeichen.
+- Die Antwort umfasst ungefähr 15 bis 70 Wörter.
+- Die Sitzung umfasst insgesamt {max_rounds} Nutzereingaben.
+- Die letzte Nutzereingabe wird mit einer kurzen Abschlussantwort ohne neue Frage beantwortet.
+"""
+
+    low_style = """
+STILREGELN FÜR DIE LOW-BEDINGUNG
+- Formuliere sachlich, ruhig und eher inhaltsbezogen.
+- Direkte Du-Ansprache vermeidest du möglichst.
+- Die Sprache soll nüchtern wirken, aber trotzdem normal und flüssig klingen.
+- Klinge nicht mechanisch, nicht steif und nicht akademisch.
+- Verwende verschiedene neutrale Einstiegsformen statt immer derselben Schablone.
+"""
+
+    high_style = """
+STILREGELN FÜR DIE HIGH-BEDINGUNG
+- Formuliere etwas natürlicher und leicht personenbezogener als in der Low-Bedingung.
+- Du darfst Du-Ansprache verwenden.
+- Die Sprache darf gesprächsnäher wirken, bleibt aber sachlich und nicht fürsorglich oder tröstend.
+- Klinge nicht locker, nicht casual und nicht emotionalisierend.
+- Verwende verschiedene natürliche Einstiegsformen statt immer derselben Schablone.
+"""
+
+    if cond == "high":
+        return base + "\n" + high_style
+    return base + "\n" + low_style
+
+
+def build_closing_prompt(cond: str, max_rounds: int) -> str:
+    base = f"""
+Du bist ein KI-basiertes Reflexionstool im Rahmen einer kurzen psychologischen Studie im Hochschulkontext.
+
+Dies ist die letzte Antwort der Reflexionsinteraktion (Runde {max_rounds} von {max_rounds}).
+
+AUFGABE
+- Formuliere eine kurze Abschlussantwort.
+- Greife den zuletzt genannten Punkt der Person knapp auf, nicht mehr als einen.
+- Füge keine neuen Inhalte, Deutungen, Ratschläge oder Zukunftsaussagen hinzu.
+- Stelle keine neue Frage.
+- Markiere klar, dass die Reflexion jetzt endet.
+
+VERBOTENE FORMULIERUNGEN
+- Keine Sätze wie "Das klingt belastend", "Ich bin für dich da", "Du hast das gut gemacht", "Das war mutig".
+- Keine Bewertungen der Person oder der Interaktion.
+- Keine therapeutische, tröstende oder beratende Sprache.
+- Alltagsnahe Begriffe wie Stress, Überforderung oder Druck darfst du aufgreifen, wenn die Person sie selbst verwendet hat.
+
+FORMATREGELN
+- Deutsch.
+- Ein kurzer Fließtextabschnitt.
+- Kein Fragezeichen.
+- Keine Bulletpoints, keine Listen.
+- 10 bis 60 Wörter.
+"""
+
+    low_style = """
+STILREGELN – BEDINGUNG A (sachlich)
+- Sachlich, nüchtern, inhaltsbezogen.
+- Du-Ansprache möglich, aber sparsam einsetzen.
+- Formuliere knapp und klar.
+"""
+
+    high_style = """
+STILREGELN – BEDINGUNG B (natürlich)
+- Natürlich, leicht personenbezogen, aber nicht empathisch oder fürsorglich.
+- Du-Ansprache selbstverständlich.
+- Formuliere knapp, klar und gesprächsnah.
+"""
+
+    if cond == "high":
+        return base + "\n" + high_style
+    return base + "\n" + low_style
+
+
+def get_recent_context(messages: List[Dict[str, str]], max_pairs: int = 3) -> str:
+    pairs = []
+    i = 0
+    while i < len(messages):
+        if messages[i]["role"] == "user":
+            user_msg = messages[i]["content"]
+            asst_msg = (
+                messages[i + 1]["content"]
+                if i + 1 < len(messages) and messages[i + 1]["role"] == "assistant"
+                else ""
+            )
+            pairs.append((user_msg, asst_msg))
+            i += 2
+        else:
+            i += 1
+
+    recent = pairs[-max_pairs:]
+    lines = []
+    for u, a in recent:
+        lines.append(f"User: {u}")
+        if a:
+            lines.append(f"Assistent: {a}")
+    return "\n".join(lines)
+
+
+def build_api_messages(
+    system_prompt: str,
+    topic: str,
+    turn: int,
+    max_rounds: int,
+    user_text: str
+) -> List[Dict[str, str]]:
+    recent_context = get_recent_context(st.session_state.messages, max_pairs=3)
+
+    user_payload = (
+        f"Studienbezogenes Hauptthema der Person: {topic}\n"
+        f"Aktuelle Rundenzahl: {turn} von {max_rounds}\n"
+    )
+
+    if recent_context:
+        user_payload += (
+            "Bisheriger Gesprächsverlauf (die letzten Schritte, User und Assistent abwechselnd). "
+            "Beziehe dich primär auf die unmittelbar letzte Nutzereingabe. "
+            "Die früheren Schritte dienen nur als Hintergrund und dürfen nur sehr knapp aufgegriffen werden. "
+            "Fasse sie nicht zusammen:\n"
+            f"{recent_context}\n"
+        )
+
+    user_payload += (
+        f"Unmittelbar letzte Eingabe der Person: {user_text}\n"
+        "Formuliere jetzt genau eine Antwort gemäß allen Regeln. "
+        "Achte besonders darauf, den ersten Satz nicht mit demselben Muster wie in der vorherigen Assistentenantwort zu beginnen."
+    )
+
+    return [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_payload},
+    ]
+
+
+def call_llm(
+    system_prompt: str,
+    topic: str,
+    turn: int,
+    max_rounds: int,
+    user_text: str,
+    temperature: float,
+) -> str:
+    client = get_openai_client()
+    model_name = get_model_name()
+
+    messages = build_api_messages(
+        system_prompt=system_prompt,
+        topic=topic,
+        turn=turn,
+        max_rounds=max_rounds,
+        user_text=user_text,
+    )
+
+    st.session_state.last_prompt_excerpt = messages[-1]["content"]
+
+    response = client.chat.completions.create(
+        model=model_name,
+        messages=messages,
+        temperature=temperature,
+        max_tokens=180,
+        frequency_penalty=0.35,
+        presence_penalty=0.10,
+    )
+
+    content = response.choices[0].message.content
+    if content is None:
+        raise RuntimeError("LLM-Antwort enthält keinen Textinhalt.")
+
+    return content.strip()
+
+
+def generate_llm_reply(user_text: str, cond: str, topic: str, turn: int, max_rounds: int) -> str:
+    system_prompt = build_system_prompt(cond=cond, max_rounds=max_rounds)
+
+    st.session_state.last_llm_error = ""
+    st.session_state.last_llm_raw_reply = ""
+    st.session_state.last_llm_status = ""
+
+    temperatures = [0.3, 0.2, 0.1][:MAX_RETRIES]
+
+    for attempt, temp in enumerate(temperatures, start=1):
+        try:
+            raw_reply = call_llm(
+                system_prompt=system_prompt,
+                topic=topic,
+                turn=turn,
+                max_rounds=max_rounds,
+                user_text=user_text,
+                temperature=temp,
+            )
+
+            st.session_state.last_llm_raw_reply = raw_reply
+
+            if validate_response(raw_reply):
+                st.session_state.last_llm_status = f"LLM ok in Versuch {attempt}"
+                return " ".join(raw_reply.split())
+
+            st.session_state.validation_fail_count += 1
+            st.session_state.last_llm_error = (
+                f"Validierung fehlgeschlagen in Versuch {attempt}. Antwort: {raw_reply}"
+            )
+            st.session_state.last_llm_status = f"Validierung fehlgeschlagen in Versuch {attempt}"
+            time.sleep(0.4)
+
+        except Exception as e:
+            st.session_state.last_llm_error = f"{type(e).__name__}: {e}"
+            st.session_state.last_llm_status = f"Fehler in Versuch {attempt}"
+            time.sleep(0.7)
+
+    st.session_state.fallback_count += 1
+    st.session_state.last_llm_status = "Fallback ausgelöst"
+    return fallback_reply(cond, user_text=user_text)
+
+
+def generate_closing_reply(user_text: str, cond: str, topic: str, turn: int, max_rounds: int) -> str:
+    system_prompt = build_closing_prompt(cond=cond, max_rounds=max_rounds)
+
+    st.session_state.last_llm_error = ""
+    st.session_state.last_llm_raw_reply = ""
+    st.session_state.last_llm_status = ""
+
+    temperatures = [0.2, 0.1, 0.0][:MAX_RETRIES]
+
+    for attempt, temp in enumerate(temperatures, start=1):
+        try:
+            raw_reply = call_llm(
+                system_prompt=system_prompt,
+                topic=topic,
+                turn=turn,
+                max_rounds=max_rounds,
+                user_text=user_text,
+                temperature=temp,
+            )
+
+            st.session_state.last_llm_raw_reply = raw_reply
+
+            if validate_closing_response(raw_reply):
+                st.session_state.last_llm_status = f"Closing ok in Versuch {attempt}"
+                return " ".join(raw_reply.split())
+
+            st.session_state.closing_validation_fail_count += 1
+            st.session_state.last_llm_error = (
+                f"Closing-Validierung fehlgeschlagen in Versuch {attempt}. Antwort: {raw_reply}"
+            )
+            st.session_state.last_llm_status = f"Closing-Validierung fehlgeschlagen in Versuch {attempt}"
+            time.sleep(0.4)
+
+        except Exception as e:
+            st.session_state.last_llm_error = f"{type(e).__name__}: {e}"
+            st.session_state.last_llm_status = f"Closing-Fehler in Versuch {attempt}"
+            time.sleep(0.7)
+
+    st.session_state.closing_fallback_count += 1
+    st.session_state.last_llm_status = "Closing-Fallback ausgelöst"
+    return closing_fallback(cond)
+
+
+def get_condition_label(cond: str) -> str:
+    if cond == "high":
+        return "high-anthropomorph"
+    return "low-anthropomorph"
 
 
 def init_state():
@@ -400,280 +826,6 @@ def write_summary_once():
                 st.session_state.closing_fallback_count,
             ]
         )
-
-
-def build_system_prompt(cond: str, max_rounds: int) -> str:
-    base = f"""
-Du bist ein KI-basiertes Reflexionstool im Rahmen einer kurzen Studie im Hochschulkontext.
-
-ROLLE UND GRENZEN
-- Du bist ein transparentes KI-System und keine menschliche Person.
-- Du ersetzt keine Therapie, kein Coaching und keine Beratung.
-- Du gibst keine Lösungen, keine Handlungsempfehlungen und keine Ziele vor.
-- Du stellst keine Diagnosen, erklärst keine psychologischen Modelle und verwendest keine psychologischen Fachbegriffe.
-- Du simulierst keine menschliche Beziehung, keine Empathie und keine emotionale Begleitung.
-
-ZIEL DER INTERAKTION
-- Deine Funktion ist minimale kognitive Strukturierung.
-- Du hilfst dabei, diffuse Beschreibungen in einen konkreten Moment, einen kleinen Ablauf oder eine kurze Alltagssituation zu überführen.
-- Du veränderst das Thema nicht, interpretierst nicht und entwickelst keine Theorie über die Person.
-- Du bleibst auf derselben Bedeutungsebene wie die Aussage der Person, formulierst sie aber verdichtet und etwas klarer.
-
-GRUNDREGEL FÜR JEDE NORMALE ANTWORT
-1. Wähle genau einen Fokus: einen Moment, einen Abschnitt im Ablauf oder eine kurze Situation im Alltag.
-2. Formuliere diesen Fokus in eigenen Worten, ohne die Eingabe nur umzuschreiben.
-3. Mache die Szene oder den Moment greifbar, aber füge keine neuen Motive, Ursachen oder Deutungen hinzu.
-4. Stelle genau eine offene Frage, die direkt an diesen Fokus anschließt.
-5. Die Frage öffnet nur eine Facette weiter: Was ist zuerst da? Wie läuft es ab? Was machst du in diesem Moment? Was geht dir dabei zuerst durch den Kopf?
-
-UMGANG MIT FORMULIERUNGEN DER PERSON
-- Du darfst einzelne Wörter der Person übernehmen, aber du wiederholst zentrale Formulierungen möglichst nicht wörtlich.
-- Wenn sich ein Inhalt als kurzer Moment oder kleine Situation beschreiben lässt, wähle dafür eigene, einfache Worte.
-- Sprich über das, was die Person konkret beschreibt (z.B. am Computer sitzen, vor dem Dokument stehen, im Bett liegen und an das Studium denken), nicht über „die Aussage“ oder „die Rückmeldung“.
-
-UMGANG MIT UNKLAREN ODER KURZEN EINGABEN
-- Auch „ich weiß nicht“ oder „ich habe tausende Gedanken“ sind inhaltlich brauchbar.
-- Spiegle dann knapp, dass der Ansatzpunkt oder die Ordnung der Gedanken gerade schwer zu fassen ist.
-- Stelle eine kleine, konkrete Frage, die hilft, einen ersten Ansatzpunkt zu finden, etwa über einen ersten Gedanken, einen ersten Moment oder ein kleines Beispiel aus dem Alltag.
-- Frag nicht nach Gründen und nicht nach Lösungen.
-
-FRAGEFORM
-- Deine Frage steht immer am Ende der Antwort.
-- Deine Frage beginnt nur mit „Was“ oder „Wie“.
-- Die Frage enthält den benannten Moment oder die beschriebene kleine Situation noch einmal in einfacher Form.
-- Du stellst keine Warum-Fragen und keine Fragen nach Plänen, Zielen oder nächsten Schritten.
-
-FORMAT
-- Deutsch.
-- Genau ein Fließtextabsatz.
-- Keine Bulletpoints, keine Listen.
-- Genau ein Fragezeichen.
-- 15 bis 70 Wörter.
-"""
-
-    low_style = """
-STIL FÜR BEDINGUNG A
-- Sachlich, ruhig und eher inhaltsbezogen.
-- Eher auf den Moment oder den Ablauf bezogen als auf die Person.
-- Nüchtern, aber normal und flüssig.
-- Keine sichtbaren Satzschablonen.
-"""
-
-    high_style = """
-STIL FÜR BEDINGUNG B
-- Etwas natürlicher und leicht personenbezogener.
-- Du-Ansprache ist erlaubt.
-- Gesprächsnäher, aber nicht warm, tröstend oder fürsorglich.
-- Kein relationaler Ton, keine emotionale Begleitung.
-"""
-
-    return base + ("\n" + high_style if cond == "high" else "\n" + low_style)
-
-
-def build_closing_prompt(cond: str, max_rounds: int) -> str:
-    base = f"""
-Du bist ein KI-basiertes Reflexionstool im Rahmen einer kurzen Studie im Hochschulkontext.
-Dies ist die letzte Antwort der Reflexionsinteraktion.
-
-AUFGABE
-- Formuliere eine kurze Abschlussantwort.
-- Greife den zuletzt sichtbaren Schwerpunkt knapp auf.
-- Füge keine neuen Inhalte, Deutungen, Ratschläge oder Zukunftsaussagen hinzu.
-- Stelle keine neue Frage.
-- Markiere klar, dass die Reflexion endet.
-
-FORMAT
-- Deutsch.
-- Ein kurzer Fließtextabschnitt.
-- Kein Fragezeichen.
-- 10 bis 60 Wörter.
-- Keine therapeutische, tröstende oder beratende Sprache.
-"""
-
-    low_style = """
-STIL FÜR BEDINGUNG A
-- Sachlich, nüchtern, inhaltsbezogen.
-- Beispiel: "Der zuletzt sichtbare Schwerpunkt wurde in dieser kurzen Reflexion eingegrenzt. Damit endet die Reflexion zu diesem Thema."
-"""
-
-    high_style = """
-STIL FÜR BEDINGUNG B
-- Natürlich, leicht personenbezogen, aber nicht empathisch oder fürsorglich.
-- Beispiel: "Du hast den zuletzt sichtbaren Schwerpunkt in dieser kurzen Reflexion aufgegriffen. Damit endet die Reflexion zu deinem Thema."
-"""
-
-    return base + ("\n" + high_style if cond == "high" else "\n" + low_style)
-
-
-def get_recent_context(messages: List[Dict[str, str]], max_items: int = 2) -> str:
-    history = []
-    for msg in messages:
-        if msg["role"] == "user":
-            history.append(f'User: {msg["content"]}')
-    if not history:
-        return ""
-    return "\n".join(history[-max_items:])
-
-
-def build_api_messages(
-    system_prompt: str,
-    topic: str,
-    turn: int,
-    max_rounds: int,
-    user_text: str
-) -> List[Dict[str, str]]:
-    recent_context = get_recent_context(st.session_state.messages, max_items=2)
-
-    user_payload = (
-        f"Studienbezogenes Hauptthema der Person: {topic}\n"
-        f"Aktuelle Rundenzahl: {turn} von {max_rounds}\n"
-    )
-
-    if recent_context:
-        user_payload += (
-            "Die folgenden zwei letzten Nutzereingaben dienen nur als Hintergrund. "
-            "Du darfst bei erkennbarer inhaltlicher Anknüpfung genau einen dieser Punkte kurz aufgreifen, "
-            "aber du fasst sie nicht zusammen:\n"
-            f"{recent_context}\n"
-        )
-
-    user_payload += (
-        f"Unmittelbar letzte Eingabe der Person: {user_text}\n"
-        "Formuliere jetzt genau eine Antwort gemäß allen Regeln. "
-        "Beziehe dich primär auf die unmittelbar letzte Eingabe und nur bei klarer Anknüpfung knapp auf genau einen der vorherigen Punkte."
-    )
-
-    return [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_payload},
-    ]
-
-
-def call_llm(
-    system_prompt: str,
-    topic: str,
-    turn: int,
-    max_rounds: int,
-    user_text: str,
-    temperature: float,
-) -> str:
-    client = get_openai_client()
-    model_name = get_model_name()
-
-    messages = build_api_messages(
-        system_prompt=system_prompt,
-        topic=topic,
-        turn=turn,
-        max_rounds=max_rounds,
-        user_text=user_text,
-    )
-
-    st.session_state.last_prompt_excerpt = messages[-1]["content"]
-
-    response = client.chat.completions.create(
-        model=model_name,
-        messages=messages,
-        temperature=temperature,
-        max_tokens=180,
-    )
-
-    content = response.choices[0].message.content
-    if content is None:
-        raise RuntimeError("LLM-Antwort enthält keinen Textinhalt.")
-
-    return content.strip()
-
-
-def generate_llm_reply(user_text: str, cond: str, topic: str, turn: int, max_rounds: int) -> str:
-    system_prompt = build_system_prompt(cond=cond, max_rounds=max_rounds)
-
-    st.session_state.last_llm_error = ""
-    st.session_state.last_llm_raw_reply = ""
-    st.session_state.last_llm_status = ""
-
-    temperatures = [0.3, 0.2, 0.1][:MAX_RETRIES]
-
-    for attempt, temp in enumerate(temperatures, start=1):
-        try:
-            raw_reply = call_llm(
-                system_prompt=system_prompt,
-                topic=topic,
-                turn=turn,
-                max_rounds=max_rounds,
-                user_text=user_text,
-                temperature=temp,
-            )
-
-            st.session_state.last_llm_raw_reply = raw_reply
-
-            if validate_response(raw_reply):
-                st.session_state.last_llm_status = f"LLM ok in Versuch {attempt}"
-                return " ".join(raw_reply.split())
-
-            st.session_state.validation_fail_count += 1
-            st.session_state.last_llm_error = (
-                f"Validierung fehlgeschlagen in Versuch {attempt}. Antwort: {raw_reply}"
-            )
-            st.session_state.last_llm_status = f"Validierung fehlgeschlagen in Versuch {attempt}"
-            time.sleep(0.4)
-
-        except Exception as e:
-            st.session_state.last_llm_error = f"{type(e).__name__}: {e}"
-            st.session_state.last_llm_status = f"Fehler in Versuch {attempt}"
-            time.sleep(0.7)
-
-    st.session_state.fallback_count += 1
-    st.session_state.last_llm_status = "Fallback ausgelöst"
-    return fallback_reply(cond, user_text=user_text)
-
-
-def generate_closing_reply(user_text: str, cond: str, topic: str, turn: int, max_rounds: int) -> str:
-    system_prompt = build_closing_prompt(cond=cond, max_rounds=max_rounds)
-
-    st.session_state.last_llm_error = ""
-    st.session_state.last_llm_raw_reply = ""
-    st.session_state.last_llm_status = ""
-
-    temperatures = [0.2, 0.1, 0.0][:MAX_RETRIES]
-
-    for attempt, temp in enumerate(temperatures, start=1):
-        try:
-            raw_reply = call_llm(
-                system_prompt=system_prompt,
-                topic=topic,
-                turn=turn,
-                max_rounds=max_rounds,
-                user_text=user_text,
-                temperature=temp,
-            )
-
-            st.session_state.last_llm_raw_reply = raw_reply
-
-            if validate_closing_response(raw_reply):
-                st.session_state.last_llm_status = f"Closing ok in Versuch {attempt}"
-                return " ".join(raw_reply.split())
-
-            st.session_state.closing_validation_fail_count += 1
-            st.session_state.last_llm_error = (
-                f"Closing-Validierung fehlgeschlagen in Versuch {attempt}. Antwort: {raw_reply}"
-            )
-            st.session_state.last_llm_status = f"Closing-Validierung fehlgeschlagen in Versuch {attempt}"
-            time.sleep(0.4)
-
-        except Exception as e:
-            st.session_state.last_llm_error = f"{type(e).__name__}: {e}"
-            st.session_state.last_llm_status = f"Closing-Fehler in Versuch {attempt}"
-            time.sleep(0.7)
-
-    st.session_state.closing_fallback_count += 1
-    st.session_state.last_llm_status = "Closing-Fallback ausgelöst"
-    return closing_fallback(cond)
-
-
-def get_condition_label(cond: str) -> str:
-    if cond == "high":
-        return "high-anthropomorph"
-    return "low-anthropomorph"
 
 
 def render_debug_sidebar():
