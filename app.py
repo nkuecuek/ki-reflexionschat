@@ -82,7 +82,7 @@ PSYCH_TERMS = [
 INTRO_TEXT = """
 Willkommen zur KI-Reflexionssession.
 
-In dieser kurzen Session reflektierst du ein aktuelles studienbezogenes Thema. Das System ist ein KI-basiertes Reflexionstool und keine Beratung oder Therapie. Es unterstützt dabei, ein studienbezogenes Anliegen kurz zu ordnen und in einer begrenzten Reflexion zu betrachten.
+In dieser kurzen Session reflektierst du ein aktuelles studienbezogenes Thema. Das System ist ein KI-basiertes Reflexionstool und keine Beratung oder Therapie. Es unterstützt dich dabei, dein Anliegen kurz zu ordnen und in einer begrenzten Reflexion zu betrachten.
 
 Die Reflexion umfasst insgesamt sechs kurze Antwortschritte. Danach endet der Chatteil automatisch. Bitte kehre anschließend zum Fragebogen zurück.
 """
@@ -476,6 +476,8 @@ AUFGABE
 - Füge keine neuen Inhalte, Deutungen, Ratschläge oder Zukunftsaussagen hinzu.
 - Stelle keine neue Frage.
 - Markiere klar, dass die Reflexion jetzt endet.
+- Die Antwort soll aus zwei kurzen Sätzen bestehen: zuerst ein knapper Bezug auf den zuletzt genannten Punkt, danach ein neutraler Satz, der das Ende dieser kurzen Reflexion markiert.
+- Die Abschlussformulierung soll klar und ruhig wirken, nicht abrupt.
 
 VERBOTENE FORMULIERUNGEN
 - Keine Sätze wie „Das klingt belastend“, „Ich bin für dich da“, „Du hast das gut gemacht“, „Das war mutig“.
@@ -495,13 +497,18 @@ FORMATREGELN
 STILREGELN – BEDINGUNG A (sachlich)
 - Sachlich, nüchtern, inhaltsbezogen.
 - Du-Ansprache möglich, aber sparsam einsetzen.
+- Beispiel für den Zielstil:
+  Zum Schluss wurde Enttäuschung als Gefühl genannt, das beim Aufschieben der wichtigen Aufgabe auftritt. Damit ist diese kurze Reflexion zu diesem studienbezogenen Thema abgeschlossen.
 """
 
     high_style = """
 STILREGELN – BEDINGUNG B (natürlich)
 - Natürlich, leicht personenbezogen, aber nicht empathisch oder fürsorglich.
 - Du-Ansprache selbstverständlich.
+- Beispiel für den Zielstil:
+  Du hast Enttäuschung als Gefühl benannt, das auftaucht, wenn du diese wichtige Aufgabe aufschiebst. Damit ist diese kurze Reflexion zu deinem Thema abgeschlossen.
 """
+
 
     if cond == "high":
         return base + "\n" + high_style
@@ -877,10 +884,10 @@ if st.session_state.phase == "intro":
     )
     st.session_state.topic = topic
 
-    st.markdown(
+        st.markdown(
         """
 **Hinweis für den Einstieg:**  
-Hilfreich ist, wenn du dein Thema kurz so beschreibst, dass der Chat deine Situation nachvollziehen kann — zum Beispiel worum es geht, welche Gedanken dich dazu beschäftigen und warum das Thema im Moment relevant ist.
+Hilfreich ist, wenn du dein Thema so beschreibst, dass klar wird, worum es im Studium gerade geht – zum Beispiel eine typische Situation, in der das Thema auftaucht, und ein paar Gedanken dazu. Diese Beschreibung dient dem Chat als Orientierung, damit sich die Rückfragen auf dein Thema beziehen.
 """
     )
 
