@@ -194,17 +194,13 @@ def starts_like_previous_assistant(text: str) -> bool:
     current_words = text.strip().split()
     previous_words = last_assistant.strip().split()
 
-    if len(current_words) < 2 or len(previous_words) < 2:
+    if len(current_words) < 4 or len(previous_words) < 4:
         return False
 
-    current_start_2 = " ".join(current_words[:2]).lower()
-    previous_start_2 = " ".join(previous_words[:2]).lower()
-    current_start_3 = " ".join(current_words[:3]).lower() if len(current_words) >= 3 else ""
-    previous_start_3 = " ".join(previous_words[:3]).lower() if len(previous_words) >= 3 else ""
+    current_start_4 = " ".join(current_words[:4]).lower()
+    previous_start_4 = " ".join(previous_words[:4]).lower()
 
-    return current_start_2 == previous_start_2 or (
-        current_start_3 and previous_start_3 and current_start_3 == previous_start_3
-    )
+    return current_start_4 == previous_start_4
 
 
 def validate_response(text: str) -> bool:
@@ -290,27 +286,27 @@ def fallback_reply(cond: str, user_text: str = "") -> str:
 
     if short in unsure_forms or is_very_short_user_input(user_text):
         variants_high = [
-            "Im Moment bleibt noch offen, woran du dieses studienbezogene Thema zuerst festmachst. Wenn du an den Anfang denkst, was fällt dir dort als Erstes auf?",
-            "Gerade ist noch schwer zu greifen, an welchem Punkt dein studienbezogenes Thema konkret beginnt. Wenn du an diese Situation denkst, was ist zuerst bemerkbar?",
-            "Noch ist nicht klar, welcher Teil deines studienbezogenen Themas im Moment am ehesten greifbar wird. Wenn du an den Anfang denkst, was taucht zuerst auf?",
+            "Du bist dir gerade noch nicht sicher, wo du bei diesem studienbezogenen Thema anfangen könntest. Was nimmst du als ersten kleinen Punkt wahr?",
+            "Noch ist für dich offen, woran du dieses studienbezogene Thema zuerst festmachen würdest. Was fällt dir als erstes kleines Detail dazu ein?",
+            "Im Moment wirkt dieses studienbezogene Thema noch eher unscharf. Was taucht dir als erster konkreter Aspekt dazu auf?",
         ]
         variants_low = [
-            "Im Moment bleibt noch unklar, welcher konkrete Punkt an diesem studienbezogenen Thema zuerst greifbar wird. Wenn du an die Situation denkst, was fällt als Erstes auf?",
-            "Noch ist offen, an welchem Punkt dieses studienbezogene Thema im Alltag zuerst sichtbar wird. Wenn du an den Anfang denkst, was lässt sich zuerst benennen?",
-            "Der erste konkrete Ansatzpunkt in diesem studienbezogenen Thema bleibt noch unscharf. Was fällt dir an dieser Situation zuerst auf?",
+            "Der erste Ansatzpunkt in diesem studienbezogenen Thema ist noch nicht klar benannt. Was lässt sich als kleiner erster Punkt wahrnehmen?",
+            "Das studienbezogene Thema liegt im Moment eher diffus vor. Was wäre ein erstes Detail, das sich davon beschreiben lässt?",
+            "Noch ist unklar, an welchem konkreten Punkt dieses studienbezogene Thema ansetzt. Was wird daran als erstes greifbar?",
         ]
         pool = variants_high if cond == "high" else variants_low
         return pool[st.session_state.turn % len(pool)]
 
     variants_high = [
-        "Mehrere Punkte rund um dein studienbezogenes Thema stehen gerade nebeneinander. Wenn du an die aktuelle Situation denkst, was tritt zuerst hervor?",
-        "In deiner Beschreibung laufen gerade verschiedene studienbezogene Punkte zusammen. Wenn du an diesen Moment denkst, was ist am deutlichsten bemerkbar?",
-        "Gerade kommen mehrere Aspekte deines studienbezogenen Themas gleichzeitig vor. Was fällt in dieser Situation zuerst auf?",
+        "In deiner Beschreibung kommen mehrere studienbezogene Punkte gleichzeitig vor. Was davon sticht dir im Alltag im Moment am deutlichsten ins Auge?",
+        "Du nennst verschiedene Aspekte rund um dein Studium, die nebeneinander stehen. Was davon bemerkst du im Alltag als erstes?",
+        "Rund um dein studienbezogenes Thema laufen mehrere Punkte zusammen. Was zeigt sich für dich in einer konkreten Situation zuerst?",
     ]
     variants_low = [
-        "Mehrere Punkte rund um das studienbezogene Thema werden hier gleichzeitig beschrieben. Wenn du an die aktuelle Situation denkst, was tritt zuerst hervor?",
-        "In der Beschreibung laufen verschiedene Aspekte des studienbezogenen Themas zusammen. Was ist in diesem Moment am deutlichsten bemerkbar?",
-        "Hier werden mehrere studienbezogene Punkte nebeneinander sichtbar. Was fällt in dieser Situation zuerst auf?",
+        "In der Beschreibung werden mehrere Aspekte des studienbezogenen Themas nebeneinander genannt. Was tritt davon in einer Alltagssituation zuerst hervor?",
+        "Mehrere studienbezogene Punkte stehen hier gleichzeitig im Raum. Was davon wird in einer konkreten Situation zuerst sichtbar?",
+        "Es werden unterschiedliche Teile des studienbezogenen Themas parallel beschrieben. Was ist in einem typischen Moment als erstes zu beobachten?",
     ]
     pool = variants_high if cond == "high" else variants_low
     return pool[st.session_state.turn % len(pool)]
@@ -358,53 +354,18 @@ ZIEL DER INTERAKTION
 - Du bleibst möglichst nahe an den Formulierungen und am Bedeutungsrahmen der Person.
 
 GRUNDREGEL FÜR JEDE ANTWORT
-Jede Antwort besteht aus genau drei Teilen in dieser Reihenfolge:
-1. kurze Spiegelung der letzten Nutzereingabe
-2. knappe Fokussierung auf einen konkreten Moment, Ablauf oder Abschnitt
-3. genau eine einfache offene Anschlussfrage
+- Jede Antwort hat genau zwei Teile: 1) ein kurzer, eigener Fokus-Satz, 2) genau eine offene Frage.
+- Der Fokus-Satz greift genau einen greifbaren Moment, einen kleinen Ablauf oder eine unmittelbar sichtbare Situation auf.
+- Wiederhole die Eingabe nicht bloß mit anderen Worten und verwende keine feste Einleitungsformel in jeder Antwort.
+- Füge keine neuen Motive, Ursachen, Bewertungen oder psychologischen Deutungen hinzu.
+- Die Frage knüpft direkt an diesen Moment an und öffnet nur eine Facette weiter: Wahrnehmung, Ablauf, erster Gedanke, Körper oder Umgebung.
 
-1. KURZE SPIEGELUNG
-- Fasse die unmittelbar letzte Nachricht der Person in maximal einem kurzen Satz zusammen.
-- Greife ausschließlich das explizit Genannte auf.
-- Du darfst den Wortlaut leicht verdichten, aber nichts inhaltlich ergänzen.
-- Du führst keine neue Gewichtung, Bewertung oder Deutung ein.
-- Wenn die letzte Eingabe sehr kurz ist, greife genau diese kurze Aussage auf.
-- Die Spiegelung soll knapp bleiben.
+REGEL FÜR DEN SATZANFANG
+- Variiere den Einstieg sichtbar.
+- Vermeide wiederkehrende Standardstarter wie "Du beschreibst gerade ...", "Hier zeigt sich ...", "Es geht gerade ...", "Im Moment bleibt ..." oder "Gerade ist noch ...".
+- Inhalt, Funktion und Kürze bleiben gleich; nur die sprachliche Oberfläche variiert.
 
-Erlaubt:
-- "Du beschreibst gerade, dass der Einstieg schwerfällt."
-- "Im Moment ist noch unklar, wo der Anfang liegen könnte."
-- "Du schreibst gerade, dass Zittern auftritt."
-
-Nicht erlaubt:
-- "Das deutet darauf hin, dass ..."
-- "Es zeigt sich, dass ..."
-- "Im Mittelpunkt steht hier eigentlich ..."
-- "Auffällig ist ..."
-- "Das hängt mit ... zusammen"
-
-2. FOKUSSIERUNG AUF EINEN KONKRETEN MOMENT
-- Lenke die Aufmerksamkeit in einem sehr kurzen Satz auf einen konkreten Moment, Ablauf oder Abschnitt.
-- Verwende dafür nur Inhalte, die in der letzten Eingabe oder im ausdrücklich genannten Hauptthema vorkommen.
-- Ein Bezug auf genau einen direkt vorherigen Nutzerschritt ist nur erlaubt, wenn die neue Eingabe daran ausdrücklich anknüpft.
-- Du ergänzt keine neuen Inhalte.
-- Du erklärst nicht, warum etwas so ist.
-- Du vermutest nicht, was dahinter steckt.
-- Du verwendest keine psychologischen Begriffe.
-- Die Fokussierung bleibt kurz und konkret.
-
-Erlaubt:
-- "Dabei geht es gerade um den Moment vor dem Anfang."
-- "Der konkrete Punkt ist hier der Einstieg in die Aufgabe."
-- "Es geht zunächst um diesen kurzen Ablauf vor dem Loslegen."
-
-Nicht erlaubt:
-- "Das deutet auf Überforderung hin."
-- "Das wirkt wie ein innerer Konflikt."
-- "Die Unsicherheit hängt möglicherweise mit Leistungsdruck zusammen."
-- "Die Reaktion scheint mit dem Thema verbunden zu sein."
-
-3. EINFACHE ANSCHLUSSFRAGE
+FRAGE
 - Stelle genau eine offene Frage.
 - Die Frage steht immer am Ende.
 - Die Frage beginnt nur mit "Was" oder "Wie".
@@ -412,16 +373,8 @@ Nicht erlaubt:
 - Die Frage soll an konkrete Beobachtungen, Situationen, Handlungen oder unmittelbare Gedanken anknüpfen.
 - Die Person soll spontan antworten können, ohne tief analysieren zu müssen.
 - Die Frage darf keinen neuen Aspekt einführen.
-- Die Frage soll helfen, eine konkrete Alltagssituation oder einen konkreten Ablauf sichtbarer zu machen.
 
-Gute Frageformen:
-- "Was passiert dann meistens als Erstes?"
-- "Was machst du in diesem Moment konkret?"
-- "Was geht dir in diesem Moment zuerst durch den Kopf?"
-- "Wie läuft dieser Moment normalerweise ab?"
-- "Wie zeigt sich das in einer konkreten Situation?"
-
-Verbotene Frageformen:
+VERBOTENE FRAGEFORMEN
 - "Warum ..."
 - "Woran ..."
 - "Inwiefern ..."
@@ -494,12 +447,6 @@ STILREGELN FÜR DIE LOW-BEDINGUNG
 - Klinge funktional und klar.
 - Klinge nicht emotional, aber auch nicht akademisch.
 - Vermeide wiederkehrende Standardformulierungen.
-
-Bevorzugte Formulierungsarten:
-- "Es geht gerade darum, dass ..."
-- "Der konkrete Punkt ist hier ..."
-- "In der Beschreibung geht es um ..."
-- "Der kurze Moment ist hier ..."
 """
 
     high_style = """
@@ -510,17 +457,11 @@ STILREGELN FÜR DIE HIGH-BEDINGUNG
 - Verwende keine warmen, tröstenden oder therapeutischen Formulierungen.
 - Bleibe sachlich und nicht fürsorglich.
 - Die Sprache darf persönlicher wirken, soll aber keine Beziehung oder emotionale Begleitung andeuten.
-
-Bevorzugte Formulierungsarten:
-- "Du beschreibst gerade, dass ..."
-- "Du schreibst, dass ..."
-- "Bei dir geht es gerade um ..."
-- "Du nennst gerade ..."
 """
 
     if cond == "high":
-        return base + "\\n" + high_style
-    return base + "\\n" + low_style
+        return base + "\n" + high_style
+    return base + "\n" + low_style
 
 
 def build_closing_prompt(cond: str, max_rounds: int) -> str:
@@ -1120,3 +1061,4 @@ elif st.session_state.phase == "finished":
                 if key in st.session_state:
                     del st.session_state[key]
             st.rerun()
+
