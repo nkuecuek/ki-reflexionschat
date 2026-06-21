@@ -82,9 +82,7 @@ PSYCH_TERMS = [
 INTRO_TEXT = """
 Willkommen zur KI-Reflexionssession.
 
-In dieser kurzen Session reflektierst du ein aktuelles studienbezogenes Thema. Das System ist ein KI-basiertes Reflexionstool und keine Beratung oder Therapie. Es unterstützt dich dabei, dein Anliegen kurz zu ordnen und in einer begrenzten Reflexion zu betrachten.
-
-Die Reflexion umfasst insgesamt sechs kurze Antwortschritte. Danach endet der Chatteil automatisch. Bitte kehre anschließend zum Fragebogen zurück.
+In dieser kurzen Reflexion beschäftigst du dich mit einem aktuellen studienbezogenen Thema. Die Interaktion umfasst insgesamt sechs kurze Antwortschritte und endet danach automatisch.
 """
 
 
