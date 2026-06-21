@@ -884,7 +884,7 @@ if st.session_state.phase == "intro":
     )
     st.session_state.topic = topic
 
-        st.markdown(
+    st.markdown(
         """
 **Hinweis für den Einstieg:**  
 Hilfreich ist, wenn du dein Thema so beschreibst, dass klar wird, worum es im Studium gerade geht – zum Beispiel eine typische Situation, in der das Thema auftaucht, und ein paar Gedanken dazu. Diese Beschreibung dient dem Chat als Orientierung, damit sich die Rückfragen auf dein Thema beziehen.
