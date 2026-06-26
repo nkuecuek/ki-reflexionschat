@@ -57,11 +57,9 @@ FORBIDDEN_PHRASES = [
 ]
 
 INTRO_TEXT = """
-Willkommen zum KI-Chat.
+Hier beschäftigst du dich kurz mit einem studienbezogenen Thema. Das System ist ein transparentes KI-Tool und keine Beratung oder Therapie. Es stellt kurze Rückfragen zu dem, was du beschreibst.
 
-Hier reflektierst du kurz ein studienbezogenes Thema. Das System ist ein transparentes KI-Tool und keine Beratung oder Therapie. Es hilft nur dabei, das Thema für eine kurze Reflexion zu ordnen.
-
-Die Interaktion besteht aus mehreren kurzen Nachrichtenschritten und endet automatisch. Anschließend geht es im Fragebogen weiter.
+Die Interaktion besteht aus mehreren kurzen Schritten und endet automatisch. Anschließend geht es im Fragebogen weiter.
 """
 
 
@@ -755,8 +753,7 @@ if st.session_state.phase == "intro":
     st.markdown(INTRO_TEXT)
 
     topic = st.text_area(
-        "Mit welchem studienbezogenen Thema oder welcher Herausforderung möchtest du dich "
-        "in dieser kurzen Reflexion beschäftigen?",
+        "Mit welchem studienbezogenen Thema oder welcher Herausforderung möchtest du dich hier beschäftigen?",
         value=st.session_state.topic,
         placeholder=(
             "Zum Beispiel: Prüfungsdruck, Stress mit der Masterarbeit, "
