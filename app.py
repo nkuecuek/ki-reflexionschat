@@ -82,7 +82,7 @@ def get_openai_client() -> OpenAI:
             "Kein API-Key gefunden. Erwartet wird OPENAI_API_KEY oder LLM_API_KEY in st.secrets."
         )
 
-    base_url = st.secrets.get("LLM_BASE_URL", "[api.openai.com](https://api.openai.com/v1)")
+    base_url = st.secrets.get("LLM_BASE_URL", "https://api.openai.com/v1")
     return OpenAI(api_key=api_key, base_url=base_url)
 
 
