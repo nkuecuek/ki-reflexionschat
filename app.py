@@ -749,8 +749,7 @@ def render_debug_sidebar():
 init_state()
 render_debug_sidebar()
 
-st.title("KI-Reflexionschat")
-st.caption("Technischer Prototyp für die Masterarbeit")
+st.title("KI-Chat")
 
 if st.session_state.phase == "intro":
     st.markdown(INTRO_TEXT)
