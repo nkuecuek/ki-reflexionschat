@@ -216,11 +216,11 @@ def closing_fallback(cond: str) -> str:
     if cond == "high":
         return (
             "Du hast zuletzt einen konkreten Punkt zu deinem studienbezogenen Thema benannt. "
-            "Damit ist diese kurze Reflexion abgeschlossen."
+            "Damit endet diese kurze Reflexion zu diesem Thema."
         )
     return (
         "Zuletzt wurde ein konkreter Punkt zum studienbezogenen Thema beschrieben. "
-        "Damit ist diese kurze Reflexion abgeschlossen."
+        "Damit endet diese kurze Reflexion zu diesem Thema."
     )
 
 
@@ -281,7 +281,7 @@ def build_system_prompt(cond: str, max_rounds: int) -> str:
         "Gute Antwort: \"Gerade ist noch kein konkreter Punkt greifbar. "
         "Was fällt dir als erstes kleines Detail zu deinem Thema ein?\"\n\n"
         "FRAGE\n"
-        "- Stelle genau eine offene Frage.\n"
+        "- Stelle genau eine offene Frage. Keine zusammengesetzten Fragen mit 'und' oder 'oder'.\n"
         "- Die Frage steht am Ende der Antwort.\n"
         "- Die Frage beginnt mit \"Was\" oder \"Wie\".\n"
         "- Die Frage ist leicht beantwortbar: Wahrnehmung, Ablauf, erster Gedanke, Umgebung, Handlung.\n"
@@ -361,7 +361,9 @@ def build_closing_prompt(cond: str, max_rounds: int) -> str:
         "- Keine therapeutische, tröstende oder beratende Sprache.\n"
         "- Keine Vorhersagen oder Empfehlungen für danach.\n"
         "- Alltagsbegriffe wie Stress, Druck oder Überforderung dürfen aufgegriffen werden,\n"
-        "  wenn die Person sie selbst verwendet hat.\n\n"
+        "  wenn die Person sie selbst verwendet hat.\n"
+        "- Kategorisiere das Thema der Person nicht selbst. Verwende im Abschlusssatz neutrale "
+        "Formulierungen wie: 'Damit endet diese kurze Reflexion zu diesem Thema.'\n\n"
         "PRIORITÄT BEI REGELKONFLIKTEN\n"
         "1. Keine Beratung, Therapie oder Handlungsempfehlung.\n"
         "2. Keine Deutung oder psychologische Erklärung.\n"
@@ -386,8 +388,8 @@ def build_closing_prompt(cond: str, max_rounds: int) -> str:
         "- Du-Ansprache vermeiden; wenn nötig, sparsam.\n"
         "- Sachlich, klar, funktional.\n\n"
         "Beispiel:\n"
-        "\"Der genannte Punkt des Aufschiebens einer wichtigen Aufgabe wurde zuletzt beschrieben. "
-        "Damit ist diese kurze Reflexion zu diesem studienbezogenen Thema abgeschlossen.\"\n"
+        "\"Zum Schluss wurde Enttäuschung als Gefühl genannt, das beim Aufschieben der wichtigen Aufgabe auftritt. "
+        "Damit endet diese kurze Reflexion zu diesem Thema.\"\n"
     )
 
     high_style = (
@@ -400,8 +402,8 @@ def build_closing_prompt(cond: str, max_rounds: int) -> str:
         "- Keine warmen, tröstenden oder informell-freundschaftlichen Formulierungen.\n"
         "- Verwende keine Ich-Formulierungen.\n\n"
         "Beispiel:\n"
-        "\"Du hast zuletzt das Aufschieben einer wichtigen Aufgabe als konkreten Punkt benannt. "
-        "Damit ist diese kurze Reflexion zu deinem Thema abgeschlossen.\"\n"
+        "\"Du hast Enttäuschung als Gefühl benannt, das auftaucht, wenn du diese wichtige Aufgabe aufschiebst. "
+        "Damit endet diese kurze Reflexion zu diesem Thema.\"\n"
     )
 
     if cond == "high":
@@ -869,7 +871,8 @@ elif st.session_state.phase == "closing":
             st.write(msg["content"])
 
     st.info(
-        "Die Reflexion ist abgeschlossen. Bitte klicke unten, um zum Fragebogen weiterzugehen."
+        "Die kurze Reflexion zu deinem studienbezogenen Thema ist jetzt abgeschlossen. "
+        "Bitte kehre nun zum Fragebogen zurück und beantworte dort die weiteren Fragen zu deiner Erfahrung mit dem Chat."
     )
 
     if st.button("Weiter zum Fragebogen", type="primary"):
