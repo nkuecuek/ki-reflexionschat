@@ -57,7 +57,7 @@ FORBIDDEN_PHRASES = [
 ]
 
 INTRO_TEXT = """
-Willkommen zum KI-Reflexionschat.
+Willkommen zum KI-Chat.
 
 Hier reflektierst du kurz ein studienbezogenes Thema. Das System ist ein transparentes KI-Tool und keine Beratung oder Therapie. Es hilft nur dabei, das Thema für eine kurze Reflexion zu ordnen.
 
