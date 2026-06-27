@@ -7,8 +7,10 @@ from pathlib import Path
 from typing import List, Dict
 from urllib.parse import quote
 
+import gspread
 import pandas as pd
 import streamlit as st
+from google.oauth2.service_account import Credentials
 from openai import OpenAI
 
 st.set_page_config(
@@ -27,6 +29,8 @@ TEMPERATURE = 0.3
 MAX_RETRIES = 3
 PROD_ROUNDS = 6
 DEFAULT_ROUNDS = PROD_ROUNDS
+
+SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
 SAFETY_KEYWORDS = [
     "suizid",
@@ -74,14 +78,84 @@ def get_openai_client() -> OpenAI:
                 break
         except Exception:
             pass
-
     if not api_key:
         raise RuntimeError(
             "Kein API-Key gefunden. Erwartet wird OPENAI_API_KEY oder LLM_API_KEY in st.secrets."
         )
-
     base_url = st.secrets.get("LLM_BASE_URL", "https://api.openai.com/v1")
     return OpenAI(api_key=api_key, base_url=base_url)
+
+
+@st.cache_resource
+def get_gsheet_client():
+    creds = Credentials.from_service_account_info(
+        st.secrets["gcp_service_account"],
+        scopes=SCOPES,
+    )
+    return gspread.authorize(creds)
+
+
+def get_gsheet(tab_name: str):
+    client = get_gsheet_client()
+    sheet_id = st.secrets["GSHEET_ID"]
+    spreadsheet = client.open_by_key(sheet_id)
+    try:
+        return spreadsheet.worksheet(tab_name)
+    except gspread.WorksheetNotFound:
+        ws = spreadsheet.add_worksheet(title=tab_name, rows=1000, cols=20)
+        return ws
+
+
+def ensure_gsheet_headers():
+    try:
+        logs_ws = get_gsheet("chat_logs")
+        if not logs_ws.get_all_values():
+            logs_ws.append_row(
+                ["session_id", "pid", "cond", "turn", "role", "text", "timestamp"]
+            )
+
+        sessions_ws = get_gsheet("chat_sessions")
+        if not sessions_ws.get_all_values():
+            sessions_ws.append_row(
+                [
+                    "session_id",
+                    "pid",
+                    "cond",
+                    "raw_cond",
+                    "session_start",
+                    "session_end",
+                    "completed_chat",
+                    "turns_completed",
+                    "user_messages_count",
+                    "topic",
+                    "safety_triggered",
+                    "validation_fail_count",
+                    "fallback_count",
+                    "closing_validation_fail_count",
+                    "closing_fallback_count",
+                ]
+            )
+    except Exception as e:
+        st.session_state.setdefault("gsheet_error", "")
+        st.session_state["gsheet_error"] = str(e)
+
+
+def gsheet_append_log(row: list):
+    try:
+        ws = get_gsheet("chat_logs")
+        ws.append_row(row, value_input_option="RAW")
+    except Exception as e:
+        st.session_state.setdefault("gsheet_error", "")
+        st.session_state["gsheet_error"] = str(e)
+
+
+def gsheet_append_session(row: list):
+    try:
+        ws = get_gsheet("chat_sessions")
+        ws.append_row(row, value_input_option="RAW")
+    except Exception as e:
+        st.session_state.setdefault("gsheet_error", "")
+        st.session_state["gsheet_error"] = str(e)
 
 
 def get_model_name() -> str:
@@ -98,7 +172,6 @@ def ensure_csv_files():
             csv.writer(f).writerow(
                 ["session_id", "pid", "cond", "turn", "role", "text", "timestamp"]
             )
-
     if not SUMMARY_FILE.exists():
         with open(SUMMARY_FILE, "w", newline="", encoding="utf-8") as f:
             csv.writer(f).writerow(
@@ -150,10 +223,8 @@ def is_very_short_user_input(text: str) -> bool:
 def validate_response(text: str) -> bool:
     if not text:
         return False
-
     raw = (text or "").strip()
     normalized = " ".join(raw.replace("\n", " ").split()).strip()
-
     if not normalized:
         return False
     if "\n" in raw:
@@ -164,43 +235,34 @@ def validate_response(text: str) -> bool:
         return False
     if not normalized.endswith("?"):
         return False
-
     words = normalized.split()
     if len(words) < 10 or len(words) > 80:
         return False
-
     lower = normalized.lower()
     if any(phrase in lower for phrase in FORBIDDEN_PHRASES):
         return False
-
     question_match = re.search(r"(Was|Wie)\b[^?]*\?$", normalized)
     if not question_match:
         return False
-
     return True
 
 
 def validate_closing_response(text: str) -> bool:
     if not text:
         return False
-
     normalized = " ".join((text or "").replace("\n", " ").split()).strip()
-
     if not normalized:
         return False
     if "?" in normalized:
         return False
     if any(sep in text for sep in ["\n", "- ", "•", "*"]):
         return False
-
     words = normalized.split()
     if len(words) < 10 or len(words) > 60:
         return False
-
     lower = normalized.lower()
     if any(phrase in lower for phrase in FORBIDDEN_PHRASES):
         return False
-
     return True
 
 
@@ -266,26 +328,26 @@ def build_system_prompt(cond: str, max_rounds: int) -> str:
         "- Beziehe dich nur dann auf etwas aus einem früheren Turn, wenn die Person in der aktuellen "
         "Eingabe ausdrücklich darauf Bezug nimmt.\n\n"
         "BEISPIELE\n"
-        "Person: \"Ich sitze vor dem Laptop und bekomme nichts geschrieben.\"\n"
-        "Gute Antwort: \"Der Moment vor dem Laptop bleibt noch ohne klaren Anfang. "
-        "Was passiert dann meistens als Erstes?\"\n\n"
-        "Person: \"Angst.\"\n"
-        "Gute Antwort: \"Das Wort Angst steht gerade allein im Raum. "
-        "Was ist eine konkrete Situation im Studium, in der sie auftaucht?\"\n\n"
-        "Person: \"Ich zittere.\"\n"
-        "Gute Antwort: \"Das Zittern wird als konkreter Punkt genannt. "
-        "Was passiert meistens direkt davor?\"\n\n"
-        "Person: \"Ich weiß nicht.\"\n"
-        "Gute Antwort: \"Gerade ist noch kein konkreter Punkt greifbar. "
-        "Was fällt dir als erstes kleines Detail zu deinem Thema ein?\"\n\n"
+        'Person: "Ich sitze vor dem Laptop und bekomme nichts geschrieben."\n'
+        'Gute Antwort: "Der Moment vor dem Laptop bleibt noch ohne klaren Anfang. '
+        'Was passiert dann meistens als Erstes?"\n\n'
+        'Person: "Angst."\n'
+        'Gute Antwort: "Das Wort Angst steht gerade allein im Raum. '
+        'Was ist eine konkrete Situation im Studium, in der sie auftaucht?"\n\n'
+        'Person: "Ich zittere."\n'
+        'Gute Antwort: "Das Zittern wird als konkreter Punkt genannt. '
+        'Was passiert meistens direkt davor?"\n\n'
+        'Person: "Ich weiß nicht."\n'
+        'Gute Antwort: "Gerade ist noch kein konkreter Punkt greifbar. '
+        'Was fällt dir als erstes kleines Detail zu deinem Thema ein?"\n\n'
         "FRAGE\n"
         "- Stelle genau eine offene Frage. Keine zusammengesetzten Fragen mit 'und' oder 'oder'.\n"
         "- Die Frage steht am Ende der Antwort.\n"
-        "- Die Frage beginnt mit \"Was\" oder \"Wie\".\n"
+        '- Die Frage beginnt mit "Was" oder "Wie".\n'
         "- Die Frage ist leicht beantwortbar: Wahrnehmung, Ablauf, erster Gedanke, Umgebung, Handlung.\n"
         "- Sie führt keinen neuen Aspekt ein.\n"
-        "- Keine Warum-Fragen. Keine Fragen mit \"Woran\", \"Inwiefern\", \"Welche\", "
-        "\"Was bedeutet das\", \"Wie wirkt sich das aus\".\n\n"
+        '- Keine Warum-Fragen. Keine Fragen mit "Woran", "Inwiefern", "Welche", '
+        '"Was bedeutet das", "Wie wirkt sich das aus".\n\n'
         "SPRACHE\n"
         "- Kurz, einfach, alltagsnah.\n"
         "- Kein wissenschaftlicher Ton.\n"
@@ -326,7 +388,7 @@ def build_system_prompt(cond: str, max_rounds: int) -> str:
         "(angelehnt an einen höflich-professionellen, leicht human-like Stil;\n"
         "entspricht human-like formal style nach Stinkeste & Skantze, 2025)\n"
         "- Verwende höfliche, professionelle Sprache.\n"
-        "- Sprich die Person direkt mit \"du\" an.\n"
+        '- Sprich die Person direkt mit "du" an.\n'
         "- Klinge näher an einem Gespräch, aber weiterhin sachlich und professionell.\n"
         "- Keine warmen, tröstenden oder informell-freundschaftlichen Formulierungen.\n"
         "- Kein Smalltalk-Ton, keine Ausrufe, keine Umgangssprache.\n"
@@ -386,8 +448,8 @@ def build_closing_prompt(cond: str, max_rounds: int) -> str:
         "- Du-Ansprache vermeiden; wenn nötig, sparsam.\n"
         "- Sachlich, klar, funktional.\n\n"
         "Beispiel:\n"
-        "\"Zum Schluss wurde Enttäuschung als Gefühl genannt, das beim Aufschieben der wichtigen Aufgabe auftritt. "
-        "Damit endet diese kurze Interaktion zu diesem Thema.\"\n"
+        '"Zum Schluss wurde Enttäuschung als Gefühl genannt, das beim Aufschieben der wichtigen Aufgabe auftritt. '
+        'Damit endet diese kurze Interaktion zu diesem Thema."\n'
     )
 
     high_style = (
@@ -400,8 +462,8 @@ def build_closing_prompt(cond: str, max_rounds: int) -> str:
         "- Keine warmen, tröstenden oder informell-freundschaftlichen Formulierungen.\n"
         "- Verwende keine Ich-Formulierungen.\n\n"
         "Beispiel:\n"
-        "\"Du hast Enttäuschung als Gefühl benannt, das auftaucht, wenn du diese wichtige Aufgabe aufschiebst. "
-        "Damit endet diese kurze Interaktion zu diesem Thema.\"\n"
+        '"Du hast Enttäuschung als Gefühl benannt, das auftaucht, wenn du diese wichtige Aufgabe aufschiebst. '
+        'Damit endet diese kurze Interaktion zu diesem Thema."\n'
     )
 
     if cond == "high":
@@ -424,7 +486,6 @@ def get_recent_context(messages: List[Dict[str, str]], max_pairs: int = 2) -> st
             i += 2
         else:
             i += 1
-
     recent = pairs[-max_pairs:]
     lines = []
     for u, a in recent:
@@ -442,12 +503,10 @@ def build_api_messages(
     user_text: str,
 ) -> List[Dict[str, str]]:
     recent_context = get_recent_context(st.session_state.messages, max_pairs=2)
-
     user_payload = (
         f"Studienbezogenes Hauptthema der Person: {topic}\n"
         f"Aktuelle Rundenzahl: {turn} von {max_rounds}\n"
     )
-
     if recent_context:
         user_payload += (
             "Bisheriger Gesprächsverlauf (die letzten Schritte). "
@@ -455,12 +514,10 @@ def build_api_messages(
             "Frühere Schritte nur als Hintergrund, nicht zusammenfassen:\n"
             f"{recent_context}\n"
         )
-
     user_payload += (
         f"Unmittelbar letzte Eingabe der Person: {user_text}\n"
         "Formuliere jetzt genau eine Antwort gemäß allen Regeln."
     )
-
     return [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_payload},
@@ -477,7 +534,6 @@ def call_llm(
 ) -> str:
     client = get_openai_client()
     model_name = get_model_name()
-
     messages = build_api_messages(
         system_prompt=system_prompt,
         topic=topic,
@@ -485,20 +541,16 @@ def call_llm(
         max_rounds=max_rounds,
         user_text=user_text,
     )
-
     st.session_state.last_prompt_excerpt = messages[-1]["content"]
-
     response = client.chat.completions.create(
         model=model_name,
         messages=messages,
         temperature=temperature,
         max_tokens=180,
     )
-
     content = response.choices[0].message.content
     if content is None:
         raise RuntimeError("LLM-Antwort enthält keinen Textinhalt.")
-
     return content.strip()
 
 
@@ -506,13 +558,10 @@ def generate_llm_reply(
     user_text: str, cond: str, topic: str, turn: int, max_rounds: int
 ) -> str:
     system_prompt = build_system_prompt(cond=cond, max_rounds=max_rounds)
-
     st.session_state.last_llm_error = ""
     st.session_state.last_llm_raw_reply = ""
     st.session_state.last_llm_status = ""
-
     temperatures = [0.3, 0.2, 0.1][:MAX_RETRIES]
-
     for attempt, temp in enumerate(temperatures, start=1):
         try:
             raw_reply = call_llm(
@@ -523,23 +572,18 @@ def generate_llm_reply(
                 user_text=user_text,
                 temperature=temp,
             )
-
             st.session_state.last_llm_raw_reply = raw_reply
-
             if validate_response(raw_reply):
                 st.session_state.last_llm_status = f"LLM ok in Versuch {attempt}"
                 return " ".join(raw_reply.split())
-
             st.session_state.validation_fail_count += 1
             st.session_state.last_llm_error = (
                 f"Validierung fehlgeschlagen in Versuch {attempt}: {raw_reply}"
             )
             time.sleep(0.4)
-
         except Exception as e:
             st.session_state.last_llm_error = f"{type(e).__name__}: {e}"
             time.sleep(0.7)
-
     st.session_state.fallback_count += 1
     st.session_state.last_llm_status = "Fallback ausgelöst"
     return fallback_reply(cond, user_text=user_text)
@@ -549,13 +593,10 @@ def generate_closing_reply(
     user_text: str, cond: str, topic: str, turn: int, max_rounds: int
 ) -> str:
     system_prompt = build_closing_prompt(cond=cond, max_rounds=max_rounds)
-
     st.session_state.last_llm_error = ""
     st.session_state.last_llm_raw_reply = ""
     st.session_state.last_llm_status = ""
-
     temperatures = [0.2, 0.1, 0.0][:MAX_RETRIES]
-
     for attempt, temp in enumerate(temperatures, start=1):
         try:
             raw_reply = call_llm(
@@ -566,23 +607,18 @@ def generate_closing_reply(
                 user_text=user_text,
                 temperature=temp,
             )
-
             st.session_state.last_llm_raw_reply = raw_reply
-
             if validate_closing_response(raw_reply):
                 st.session_state.last_llm_status = f"Closing ok in Versuch {attempt}"
                 return " ".join(raw_reply.split())
-
             st.session_state.closing_validation_fail_count += 1
             st.session_state.last_llm_error = (
                 f"Closing-Validierung fehlgeschlagen in Versuch {attempt}: {raw_reply}"
             )
             time.sleep(0.4)
-
         except Exception as e:
             st.session_state.last_llm_error = f"{type(e).__name__}: {e}"
             time.sleep(0.7)
-
     st.session_state.closing_fallback_count += 1
     st.session_state.last_llm_status = "Closing-Fallback ausgelöst"
     return closing_fallback(cond)
@@ -593,7 +629,9 @@ def get_condition_label(cond: str) -> str:
 
 
 def init_state():
+    st.session_state.setdefault("gsheet_error", "")
     ensure_csv_files()
+    ensure_gsheet_headers()
 
     pid = get_param("pid", "").strip()
     raw_cond = get_param("cond", "").strip().lower()
@@ -655,60 +693,63 @@ def init_state():
         "last_llm_raw_reply": "",
         "last_llm_status": "",
         "last_prompt_excerpt": "",
+        "gsheet_error": "",
     }
-
     for k, v in defaults.items():
         if k not in st.session_state:
             st.session_state[k] = v
 
 
 def log_message(role: str, text: str):
-    with open(LOG_FILE, "a", newline="", encoding="utf-8") as f:
-        csv.writer(f).writerow(
-            [
-                st.session_state.session_id,
-                st.session_state.pid,
-                st.session_state.cond,
-                st.session_state.turn,
-                role,
-                text,
-                now_iso(),
-            ]
-        )
+    row = [
+        st.session_state.session_id,
+        st.session_state.pid,
+        st.session_state.cond,
+        st.session_state.turn,
+        role,
+        text,
+        now_iso(),
+    ]
+    gsheet_append_log(row)
+    try:
+        with open(LOG_FILE, "a", newline="", encoding="utf-8") as f:
+            csv.writer(f).writerow(row)
+    except Exception:
+        pass
 
 
 def write_summary_once():
     if st.session_state.session_end:
         return
-
     st.session_state.session_end = now_iso()
-
-    with open(SUMMARY_FILE, "a", newline="", encoding="utf-8") as f:
-        csv.writer(f).writerow(
-            [
-                st.session_state.session_id,
-                st.session_state.pid,
-                st.session_state.cond,
-                st.session_state.raw_cond,
-                st.session_state.session_start,
-                st.session_state.session_end,
-                "yes" if st.session_state.chat_completed else "no",
-                st.session_state.turn,
-                st.session_state.user_messages_count,
-                st.session_state.topic,
-                "yes" if st.session_state.safety_triggered else "no",
-                st.session_state.validation_fail_count,
-                st.session_state.fallback_count,
-                st.session_state.closing_validation_fail_count,
-                st.session_state.closing_fallback_count,
-            ]
-        )
+    row = [
+        st.session_state.session_id,
+        st.session_state.pid,
+        st.session_state.cond,
+        st.session_state.raw_cond,
+        st.session_state.session_start,
+        st.session_state.session_end,
+        "yes" if st.session_state.chat_completed else "no",
+        st.session_state.turn,
+        st.session_state.user_messages_count,
+        st.session_state.topic,
+        "yes" if st.session_state.safety_triggered else "no",
+        st.session_state.validation_fail_count,
+        st.session_state.fallback_count,
+        st.session_state.closing_validation_fail_count,
+        st.session_state.closing_fallback_count,
+    ]
+    gsheet_append_session(row)
+    try:
+        with open(SUMMARY_FILE, "a", newline="", encoding="utf-8") as f:
+            csv.writer(f).writerow(row)
+    except Exception:
+        pass
 
 
 def render_debug_sidebar():
     if not st.session_state.debug_mode:
         return
-
     with st.sidebar:
         st.markdown("### Debug")
         st.write(
@@ -721,20 +762,17 @@ def render_debug_sidebar():
                 "phase": st.session_state.phase,
                 "validation_fail_count": st.session_state.validation_fail_count,
                 "fallback_count": st.session_state.fallback_count,
+                "gsheet_error": st.session_state.gsheet_error,
             }
         )
-
         if st.session_state.last_llm_status:
             st.info(st.session_state.last_llm_status)
-
         if st.session_state.last_llm_error:
             st.error("Letzter LLM-Fehler")
             st.code(st.session_state.last_llm_error)
-
         if st.session_state.last_llm_raw_reply:
             st.write("Letzte rohe Modellantwort:")
             st.code(st.session_state.last_llm_raw_reply)
-
         if st.session_state.last_prompt_excerpt:
             st.write("Letzter Prompt-Ausschnitt:")
             st.code(st.session_state.last_prompt_excerpt)
@@ -751,7 +789,6 @@ st.title("KI-Chat")
 
 if st.session_state.phase == "intro":
     st.markdown(INTRO_TEXT)
-
     topic = st.text_area(
         "Mit welchem studienbezogenen Thema oder welcher Herausforderung möchtest du dich hier beschäftigen?",
         value=st.session_state.topic,
@@ -762,12 +799,10 @@ if st.session_state.phase == "intro":
         height=140,
     )
     st.session_state.topic = topic
-
     st.markdown(
         "**Hinweis:** Hilfreich ist, wenn du dein Thema so beschreibst, dass klar wird, "
         "worum es im Studium gerade geht. Diese Beschreibung dient dem Chat als Orientierung."
     )
-
     if st.button("Interaktion starten", type="primary"):
         if not validate_topic_input(topic):
             st.warning(
@@ -782,16 +817,12 @@ if st.session_state.phase == "intro":
 
 elif st.session_state.phase == "chat":
     st.subheader(f"Thema: {st.session_state.topic}")
-# st.write(f"Schritt {st.session_state.turn + 1} von {st.session_state.max_rounds}")
-
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.write(msg["content"])
-
     if st.session_state.pending_finish:
         st.session_state.phase = "closing"
         st.rerun()
-
     if (
         st.session_state.turn >= st.session_state.max_rounds
         and not st.session_state.pending_finish
@@ -799,16 +830,13 @@ elif st.session_state.phase == "chat":
         st.session_state.chat_completed = True
         st.session_state.pending_finish = True
         st.rerun()
-
     user_input = st.chat_input("Schreibe hier deine Antwort ...")
-
     if user_input:
         if check_safety(user_input):
             st.session_state.safety_triggered = True
             st.session_state.messages.append({"role": "user", "content": user_input})
             log_message("user", user_input)
             st.session_state.user_messages_count += 1
-
             safety_msg = (
                 "Dein Text enthält Hinweise auf starke Belastung oder eine mögliche Krisensituation. "
                 "Dieses KI-System kann in solchen Situationen keine Hilfe leisten. "
@@ -817,7 +845,6 @@ elif st.session_state.phase == "chat":
             )
             st.session_state.messages.append({"role": "assistant", "content": safety_msg})
             log_message("assistant", safety_msg)
-
             st.session_state.phase = "safety"
             st.rerun()
 
@@ -828,7 +855,6 @@ elif st.session_state.phase == "chat":
         with st.chat_message("assistant"):
             with st.spinner("Antwort wird erzeugt ..."):
                 is_last_turn = st.session_state.turn >= st.session_state.max_rounds - 1
-
                 if is_last_turn:
                     reply = generate_closing_reply(
                         user_text=user_input,
@@ -845,7 +871,6 @@ elif st.session_state.phase == "chat":
                         turn=st.session_state.turn + 1,
                         max_rounds=st.session_state.max_rounds,
                     )
-
                 st.write(reply)
 
         st.session_state.messages.append({"role": "assistant", "content": reply})
@@ -856,21 +881,17 @@ elif st.session_state.phase == "chat":
             st.session_state.chat_completed = True
             st.session_state.closing_logged = True
             st.session_state.pending_finish = True
-
         st.rerun()
 
 elif st.session_state.phase == "closing":
     st.subheader(f"Thema: {st.session_state.topic}")
-
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.write(msg["content"])
-
     st.info(
         "Die kurze Interaktion zu deinem studienbezogenen Thema ist jetzt abgeschlossen. "
         "Bitte kehre nun zum Fragebogen zurück und beantworte dort die weiteren Fragen zu deiner Erfahrung mit dem Chat."
     )
-
     if st.button("Weiter zum Fragebogen", type="primary"):
         st.session_state.phase = "finished"
         st.rerun()
@@ -879,12 +900,10 @@ elif st.session_state.phase == "safety":
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.write(msg["content"])
-
     st.warning(
         "Diese Interaktion wird jetzt beendet. "
         "Bitte wende dich bei Bedarf an eine der genannten Stellen."
     )
-
     if st.button("Sitzung beenden", type="primary"):
         st.session_state.phase = "finished"
         st.rerun()
@@ -896,7 +915,6 @@ elif st.session_state.phase == "finished":
         "Vielen Dank für deine Teilnahme. "
         "Im nächsten Schritt geht es im Fragebogen mit einigen Fragen zu deiner Erfahrung weiter."
     )
-
     if st.session_state.return_url:
         safe_url = quote(st.session_state.return_url, safe=":/?&=%#")
         st.markdown(
@@ -908,14 +926,14 @@ elif st.session_state.phase == "finished":
         )
     else:
         st.info("Bitte wechsle manuell zurück zum Fragebogen-Tab in deinem Browser.")
-
     if st.session_state.debug_mode:
+        if st.session_state.gsheet_error:
+            st.error(f"Google Sheets Fehler: {st.session_state.gsheet_error}")
         st.markdown("### Sitzungsdaten")
         if LOG_FILE.exists():
             df = pd.read_csv(LOG_FILE)
             session_df = df[df["session_id"] == st.session_state.session_id]
             st.dataframe(session_df, use_container_width=True)
-
         if st.button("Neue Testsitzung starten"):
             for key in [
                 "phase",
@@ -938,6 +956,7 @@ elif st.session_state.phase == "finished":
                 "last_llm_raw_reply",
                 "last_llm_status",
                 "last_prompt_excerpt",
+                "gsheet_error",
             ]:
                 if key in st.session_state:
                     del st.session_state[key]
