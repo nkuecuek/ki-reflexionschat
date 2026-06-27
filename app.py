@@ -345,11 +345,11 @@ def build_closing_prompt(cond: str, max_rounds: int) -> str:
     base = (
         "Du bist ein KI-basiertes Reflexionstool im Rahmen einer kurzen psychologischen Studie "
         "im Hochschulkontext.\n\n"
-        f"Dies ist die letzte Antwort der Reflexionsinteraktion (Runde {max_rounds} von {max_rounds}).\n\n"
+        f"Dies ist die letzte Antwort der Interaktion (Runde {max_rounds} von {max_rounds}).\n\n"
         "AUFGABE\n"
         "- Formuliere eine kurze Abschlussantwort aus genau zwei Sätzen.\n"
         "- Erster Satz: Greife genau einen Punkt aus der letzten Eingabe der Person knapp auf.\n"
-        "- Zweiter Satz: Markiere klar und ruhig, dass diese kurze Reflexion jetzt endet.\n"
+        "- Zweiter Satz: Markiere klar und ruhig, dass diese kurze Interaktion jetzt endet.\n"
         "- Füge keine neuen Inhalte, Deutungen, Ratschläge oder Zukunftsaussagen hinzu.\n"
         "- Stelle keine neue Frage.\n"
         "- Bewerte weder die Person noch die Interaktion.\n\n"
@@ -361,7 +361,7 @@ def build_closing_prompt(cond: str, max_rounds: int) -> str:
         "- Alltagsbegriffe wie Stress, Druck oder Überforderung dürfen aufgegriffen werden,\n"
         "  wenn die Person sie selbst verwendet hat.\n"
         "- Kategorisiere das Thema der Person nicht selbst. Verwende im Abschlusssatz neutrale "
-        "Formulierungen wie: 'Damit endet diese kurze Reflexion zu diesem Thema.'\n\n"
+        "Formulierungen wie: 'Damit endet diese kurze Interaktion zu diesem Thema.'\n\n"
         "PRIORITÄT BEI REGELKONFLIKTEN\n"
         "1. Keine Beratung, Therapie oder Handlungsempfehlung.\n"
         "2. Keine Deutung oder psychologische Erklärung.\n"
@@ -387,7 +387,7 @@ def build_closing_prompt(cond: str, max_rounds: int) -> str:
         "- Sachlich, klar, funktional.\n\n"
         "Beispiel:\n"
         "\"Zum Schluss wurde Enttäuschung als Gefühl genannt, das beim Aufschieben der wichtigen Aufgabe auftritt. "
-        "Damit endet diese kurze Reflexion zu diesem Thema.\"\n"
+        "Damit endet diese kurze Interaktion zu diesem Thema.\"\n"
     )
 
     high_style = (
@@ -401,7 +401,7 @@ def build_closing_prompt(cond: str, max_rounds: int) -> str:
         "- Verwende keine Ich-Formulierungen.\n\n"
         "Beispiel:\n"
         "\"Du hast Enttäuschung als Gefühl benannt, das auftaucht, wenn du diese wichtige Aufgabe aufschiebst. "
-        "Damit endet diese kurze Reflexion zu diesem Thema.\"\n"
+        "Damit endet diese kurze Interaktion zu diesem Thema.\"\n"
     )
 
     if cond == "high":
@@ -768,7 +768,7 @@ if st.session_state.phase == "intro":
         "worum es im Studium gerade geht. Diese Beschreibung dient dem Chat als Orientierung."
     )
 
-    if st.button("Reflexion starten", type="primary"):
+    if st.button("Interaktion starten", type="primary"):
         if not validate_topic_input(topic):
             st.warning(
                 "Bitte beschreibe dein Thema etwas genauer, bevor du die Interaktion startest."
@@ -781,8 +781,8 @@ if st.session_state.phase == "intro":
             st.rerun()
 
 elif st.session_state.phase == "chat":
-    st.subheader(f"Reflexion: {st.session_state.topic}")
-    st.write(f"Schritt {st.session_state.turn + 1} von {st.session_state.max_rounds}")
+    st.subheader(f"Thema: {st.session_state.topic}")
+# st.write(f"Schritt {st.session_state.turn + 1} von {st.session_state.max_rounds}")
 
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
@@ -860,7 +860,7 @@ elif st.session_state.phase == "chat":
         st.rerun()
 
 elif st.session_state.phase == "closing":
-    st.subheader(f"Reflexion: {st.session_state.topic}")
+    st.subheader(f"Thema: {st.session_state.topic}")
 
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
