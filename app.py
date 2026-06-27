@@ -214,11 +214,11 @@ def closing_fallback(cond: str) -> str:
     if cond == "high":
         return (
             "Du hast zuletzt einen konkreten Punkt zu deinem studienbezogenen Thema benannt. "
-            "Damit endet diese kurze Reflexion zu diesem Thema."
+            "Damit endet diese kurze Interaktion zu diesem Thema."
         )
     return (
         "Zuletzt wurde ein konkreter Punkt zum studienbezogenen Thema beschrieben. "
-        "Damit endet diese kurze Reflexion zu diesem Thema."
+        "Damit endet diese kurze Interaktion zu diesem Thema."
     )
 
 
@@ -771,7 +771,7 @@ if st.session_state.phase == "intro":
     if st.button("Reflexion starten", type="primary"):
         if not validate_topic_input(topic):
             st.warning(
-                "Bitte beschreibe dein Thema etwas genauer, bevor du die Reflexion startest."
+                "Bitte beschreibe dein Thema etwas genauer, bevor du die Interaktion startest."
             )
         else:
             intro_msg = "Beschreibe, was dich an deinem Thema gerade beschäftigt."
@@ -867,7 +867,7 @@ elif st.session_state.phase == "closing":
             st.write(msg["content"])
 
     st.info(
-        "Die kurze Reflexion zu deinem studienbezogenen Thema ist jetzt abgeschlossen. "
+        "Die kurze Interaktion zu deinem studienbezogenen Thema ist jetzt abgeschlossen. "
         "Bitte kehre nun zum Fragebogen zurück und beantworte dort die weiteren Fragen zu deiner Erfahrung mit dem Chat."
     )
 
@@ -881,7 +881,7 @@ elif st.session_state.phase == "safety":
             st.write(msg["content"])
 
     st.warning(
-        "Diese Reflexionssitzung wird jetzt beendet. "
+        "Diese Interaktion wird jetzt beendet. "
         "Bitte wende dich bei Bedarf an eine der genannten Stellen."
     )
 
