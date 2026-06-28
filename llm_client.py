@@ -4,7 +4,7 @@ import string
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict
+from typing import Dict, List
 from urllib.parse import quote
 
 import gspread
@@ -427,32 +427,32 @@ def build_system_prompt(cond: str, max_rounds: int) -> str:
 
     low_style = (
         "\nSTILREGELN LOW-BEDINGUNG\n"
-        "- Formuliere neutral, einfach und sachlich.\n"
-        "- Beziehe dich eher auf die beschriebene Situation als direkt auf die Person.\n"
-        "- Vermeide direkte Du-Ansprache möglichst.\n"
-        "- Klinge funktional und klar.\n"
-        "- Klinge nicht emotional, aber auch nicht akademisch.\n"
-        "- Vermeide wiederkehrende Standardformulierungen.\n\n"
-        "Bevorzugte Formulierungsarten:\n"
-        '- "Es geht gerade darum, dass ..."\n'
-        '- "Der konkrete Punkt ist hier ..."\n'
-        '- "In der Beschreibung geht es um ..."\n'
-        '- "Der kurze Moment ist hier ..."\n'
+        "(angelehnt an einen sachlich-funktionalen, wenig anthropomorphen Stil;\n"
+        "entspricht machine-like style nach Stinkeste & Skantze, 2025)\n"
+        "- Verwende keine Ich-Referenzen. Schreibe nicht aus einer Ich-Perspektive.\n"
+        "- Verwende keine emotionalen Ausdrücke und simuliere keine emotionale Resonanz.\n"
+        "- Beziehe dich auf die beschriebene Situation oder den genannten Sachverhalt,\n"
+        "  nicht direkt auf die Person.\n"
+        "- Vermeide direkte Du-Ansprache möglichst; wenn unvermeidbar, sparsam einsetzen.\n"
+        "- Der Ton bleibt funktional, klar und sachlich.\n"
+        "- Klinge nicht akademisch, aber auch nicht gesprächsnah.\n"
+        "- Der Fokus-Satz benennt einen Sachverhalt, als würde ein neutrales System\n"
+        "  etwas markieren, nicht als würde jemand mit der Person sprechen.\n"
     )
 
     high_style = (
         "\nSTILREGELN HIGH-BEDINGUNG\n"
-        "- Formuliere natürlicher und leicht personenbezogener als in der Low-Bedingung.\n"
-        "- Du darfst Du-Ansprache verwenden.\n"
-        "- Klinge etwas näher an einem Gespräch, aber weiterhin klar als KI-System.\n"
-        "- Verwende keine warmen, tröstenden oder therapeutischen Formulierungen.\n"
-        "- Bleibe sachlich und nicht fürsorglich.\n"
-        "- Die Sprache darf persönlicher wirken, soll aber keine Beziehung oder emotionale Begleitung andeuten.\n\n"
-        "Bevorzugte Formulierungsarten:\n"
-        '- "Du beschreibst gerade, dass ..."\n'
-        '- "Du schreibst, dass ..."\n'
-        '- "Bei dir geht es gerade um ..."\n'
-        '- "Du nennst gerade ..."\n'
+        "(angelehnt an einen höflich-professionellen, leicht human-like Stil;\n"
+        "entspricht human-like formal style nach Stinkeste & Skantze, 2025)\n"
+        "- Verwende höfliche, professionelle Sprache.\n"
+        '- Sprich die Person direkt mit "du" an.\n'
+        "- Klinge näher an einem Gespräch, aber weiterhin sachlich und professionell.\n"
+        "- Keine warmen, tröstenden oder informell-freundschaftlichen Formulierungen.\n"
+        "- Kein Smalltalk-Ton, keine Ausrufe, keine Umgangssprache.\n"
+        "- Verwende keine Ich-Formulierungen. Die größere sprachliche Nähe entsteht\n"
+        "  über direkte Ansprache, natürlichere Satzstruktur und Gesprächsnähe,\n"
+        "  nicht über eine eigene Ich-Perspektive des Systems.\n"
+        "- Der Fokus-Satz klingt direkt adressiert und personenbezogen, aber professionell distanziert.\n"
     )
 
     if cond == "high":
@@ -491,8 +491,13 @@ def build_closing_prompt(cond: str, max_rounds: int) -> str:
 
     low_style = (
         "\nSTILREGELN LOW-BEDINGUNG\n"
-        "- Sachlich, nüchtern, inhaltsbezogen.\n"
-        "- Du-Ansprache möglichst vermeiden.\n\n"
+        "(angelehnt an einen sachlich-funktionalen, wenig anthropomorphen Stil;\n"
+        "entspricht machine-like style nach Stinkeste & Skantze, 2025)\n"
+        "- Verwende keine Ich-Referenzen.\n"
+        "- Keine emotionalen Ausdrücke.\n"
+        "- Beziehe dich auf den Sachverhalt, nicht auf die Person.\n"
+        "- Du-Ansprache vermeiden; wenn nötig, sparsam.\n"
+        "- Sachlich, klar, funktional.\n\n"
         "Beispiel:\n"
         '"Zum Schluss wurde Enttäuschung als Gefühl genannt, das beim Aufschieben der wichtigen Aufgabe auftritt. '
         'Damit endet diese kurze Interaktion zu diesem Thema."\n'
@@ -500,8 +505,13 @@ def build_closing_prompt(cond: str, max_rounds: int) -> str:
 
     high_style = (
         "\nSTILREGELN HIGH-BEDINGUNG\n"
-        "- Natürlich, leicht personenbezogen, aber nicht empathisch oder fürsorglich.\n"
-        "- Du-Ansprache selbstverständlich.\n\n"
+        "(angelehnt an einen höflich-professionellen, leicht human-like Stil;\n"
+        "entspricht human-like formal style nach Stinkeste & Skantze, 2025)\n"
+        "- Höfliche, professionelle Sprache.\n"
+        "- Du-Ansprache selbstverständlich.\n"
+        "- Näher an einem Gespräch, aber sachlich und nicht persönlich-vertraut.\n"
+        "- Keine warmen, tröstenden oder informell-freundschaftlichen Formulierungen.\n"
+        "- Verwende keine Ich-Formulierungen.\n\n"
         "Beispiel:\n"
         '"Du hast Enttäuschung als Gefühl benannt, das auftaucht, wenn du diese wichtige Aufgabe aufschiebst. '
         'Damit endet diese kurze Interaktion zu diesem Thema."\n'
