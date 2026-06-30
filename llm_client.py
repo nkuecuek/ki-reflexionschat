@@ -1118,8 +1118,7 @@ elif st.session_state.phase == "closing":
 
     st.info(
         "Die kurze Interaktion zu deinem studienbezogenen Thema ist jetzt abgeschlossen. "
-        "Bitte klicke jetzt auf den Button, um zum Fragebogen zur
-00fcckzukehren."
+        "Bitte klicke jetzt auf den Button, um zum Fragebogen zurückzukehren."
     )
 
     if st.button("Weiter zum Fragebogen", type="primary"):
