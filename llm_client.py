@@ -986,15 +986,19 @@ elif st.session_state.phase == "chat":
                 st.write(reply)
 
         st.session_state.messages.append({"role": "assistant", "content": reply})
-        log_message("assistant", reply)
-        st.session_state.turn += 1
+log_message("assistant", reply)
+st.session_state.turn += 1
 
-        if is_last_turn:
-            st.session_state.chat_completed = True
-            st.session_state.closing_logged = True
-            st.session_state.pending_finish = True
+if is_last_turn:
+    st.session_state.chat_completed = True
+    st.session_state.closing_logged = True
 
-        st.rerun()
+    # SOFORT speichern sobald letzter Turn erreicht wurde
+    write_summary_once()
+
+    st.session_state.pending_finish = True
+
+st.rerun()
 
 elif st.session_state.phase == "closing":
     st.subheader(f"Thema: {st.session_state.topic}")
