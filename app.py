@@ -930,7 +930,7 @@ elif st.session_state.phase == "closing":
             st.write(msg["content"])
 
     st.info(
-        "Bitte drücke jetzt auf den Button \u2014 erst dann gelangst du zum Fragebogen."
+        "Bitte drücke jetzt auf den Button \u2014 erst dann werden deine Daten gespeichert."
     )
 
     if st.button("Weiter zum Fragebogen", type="primary"):
