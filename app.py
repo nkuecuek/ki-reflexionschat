@@ -2,7 +2,7 @@ import csv
 import re
 import string
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List
 from urllib.parse import quote
@@ -35,8 +35,7 @@ SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 SAFETY_KEYWORDS = [
     "suizid",
     "ich bringe mich um",
-    "ich m
-00f6chte sterben",
+    "ich möchte sterben",
     "ich will sterben",
     "mich umbringen",
     "selbstverletzung",
@@ -45,20 +44,16 @@ SAFETY_KEYWORDS = [
 ]
 
 FORBIDDEN_PHRASES = [
-    "ich bin f
-00fcr dich da",
-    "danke f
-00fcr dein vertrauen",
+    "ich bin für dich da",
+    "danke für dein vertrauen",
     "ich verstehe dich",
-    "ich f
-00fchle mit dir",
+    "ich fühle mit dir",
     "du bist nicht allein",
     "ich begleite dich",
     "du solltest",
     "du musst",
     "mein rat",
-    "am besten w
-00e4re",
+    "am besten wäre",
     "versuche doch",
     "das klingt belastend",
     "vielleicht steckt",
@@ -66,12 +61,9 @@ FORBIDDEN_PHRASES = [
 ]
 
 INTRO_TEXT = """
-Hier besch
-00e4ftigst du dich kurz mit einem studienbezogenen Thema. Das System ist ein transparentes KI-Tool und keine Beratung oder Therapie. Es stellt kurze R
-00fcckfragen zu dem, was du beschreibst.
+Hier beschäftigst du dich kurz mit einem studienbezogenen Thema. Das System ist ein transparentes KI-Tool und keine Beratung oder Therapie. Es stellt kurze Rückfragen zu dem, was du beschreibst.
 
-Die Interaktion besteht aus mehreren kurzen Schritten und endet automatisch. Anschlie
-00dfend geht es im Fragebogen weiter.
+Die Interaktion besteht aus mehreren kurzen Schritten und endet automatisch. Anschließend geht es im Fragebogen weiter.
 """
 
 
@@ -167,7 +159,7 @@ def get_model_name() -> str:
 
 
 def now_iso() -> str:
-    return datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 def ensure_csv_files():
@@ -223,8 +215,7 @@ def validate_response(text: str) -> bool:
         return False
     if "\n" in raw:
         return False
-    if any(sep in raw for sep in ["- ", "
-2022", "* "]):
+    if any(sep in raw for sep in ["- ", "•", "* "]):
         return False
     if normalized.count("?") != 1:
         return False
@@ -250,8 +241,7 @@ def validate_closing_response(text: str) -> bool:
         return False
     if "?" in normalized:
         return False
-    if any(sep in text for sep in ["\n", "- ", "
-2022", "*"]):
+    if any(sep in text for sep in ["\n", "- ", "•", "*"]):
         return False
     words = normalized.split()
     if len(words) < 10 or len(words) > 60:
@@ -265,39 +255,31 @@ def validate_closing_response(text: str) -> bool:
 def fallback_reply(cond: str, user_text: str = "") -> str:
     short = (user_text or "").strip().lower()
     unsure_forms = {
-        "ich wei
-00df nicht", "ich weiss nicht", "wei
-00df nicht", "weiss nicht",
+        "ich weiß nicht", "ich weiss nicht", "weiß nicht", "weiss nicht",
         "keine ahnung", "nicht sicher", "kp", "idk", "schwer zu sagen", "unsicher",
     }
     if short in unsure_forms or is_very_short_user_input(user_text):
         variants_high = [
-            "Im Moment bleibt noch offen, woran du dieses studienbezogene Thema zuerst festmachst. Wenn du an den Anfang denkst, was f
-00e4llt dir dort als Erstes auf?",
+            "Im Moment bleibt noch offen, woran du dieses studienbezogene Thema zuerst festmachst. Wenn du an den Anfang denkst, was fällt dir dort als Erstes auf?",
             "Gerade ist noch schwer zu greifen, an welchem Punkt dein studienbezogenes Thema konkret beginnt. Wenn du an diese Situation denkst, was ist zuerst bemerkbar?",
             "Noch ist nicht klar, welcher Teil deines studienbezogenen Themas im Moment am ehesten greifbar wird. Wenn du an den Anfang denkst, was taucht zuerst auf?",
         ]
         variants_low = [
-            "Im Moment bleibt noch unklar, welcher konkrete Punkt an diesem studienbezogenen Thema zuerst greifbar wird. Wenn du an die Situation denkst, was f
-00e4llt als Erstes auf?",
-            "Noch ist offen, an welchem Punkt dieses studienbezogene Thema im Alltag zuerst sichtbar wird. Wenn du an den Anfang denkst, was l
-00e4sst sich zuerst benennen?",
-            "Der erste konkrete Ansatzpunkt in diesem studienbezogenen Thema bleibt noch unscharf. Was f
-00e4llt dir an dieser Situation zuerst auf?",
+            "Im Moment bleibt noch unklar, welcher konkrete Punkt an diesem studienbezogenen Thema zuerst greifbar wird. Wenn du an die Situation denkst, was fällt als Erstes auf?",
+            "Noch ist offen, an welchem Punkt dieses studienbezogene Thema im Alltag zuerst sichtbar wird. Wenn du an den Anfang denkst, was lässt sich zuerst benennen?",
+            "Der erste konkrete Ansatzpunkt in diesem studienbezogenen Thema bleibt noch unscharf. Was fällt dir an dieser Situation zuerst auf?",
         ]
         pool = variants_high if cond == "high" else variants_low
         return pool[st.session_state.turn % len(pool)]
     variants_high = [
         "Mehrere Punkte rund um dein studienbezogenes Thema stehen gerade nebeneinander. Wenn du an die aktuelle Situation denkst, was tritt zuerst hervor?",
         "In deiner Beschreibung laufen gerade verschiedene studienbezogene Punkte zusammen. Wenn du an diesen Moment denkst, was ist am deutlichsten bemerkbar?",
-        "Gerade kommen mehrere Aspekte deines studienbezogenen Themas gleichzeitig vor. Was f
-00e4llt in dieser Situation zuerst auf?",
+        "Gerade kommen mehrere Aspekte deines studienbezogenen Themas gleichzeitig vor. Was fällt in dieser Situation zuerst auf?",
     ]
     variants_low = [
         "Mehrere Punkte rund um das studienbezogene Thema werden hier gleichzeitig beschrieben. Wenn du an die aktuelle Situation denkst, was tritt zuerst hervor?",
         "In der Beschreibung laufen verschiedene Aspekte des studienbezogenen Themas zusammen. Was ist in diesem Moment am deutlichsten bemerkbar?",
-        "Hier werden mehrere studienbezogene Punkte nebeneinander sichtbar. Was f
-00e4llt in dieser Situation zuerst auf?",
+        "Hier werden mehrere studienbezogene Punkte nebeneinander sichtbar. Was fällt in dieser Situation zuerst auf?",
     ]
     pool = variants_high if cond == "high" else variants_low
     return pool[st.session_state.turn % len(pool)]
@@ -328,53 +310,38 @@ def build_system_prompt(cond: str, max_rounds: int) -> str:
         "ROLLE\n"
         "- Du bist ein transparentes KI-System, keine menschliche Person.\n"
         "- Du ersetzt keine Therapie, kein Coaching und keine Beratung.\n"
-        "- Du gibst keine L
-00f6sungen und keine Handlungsempfehlungen.\n"
+        "- Du gibst keine Lösungen und keine Handlungsempfehlungen.\n"
         "- Du stellst keine Diagnosen und verwendest keine psychologischen Fachbegriffe.\n\n"
         "THEMENRAHMEN\n"
-        "- Die Person schreibt 
-00fcber ein studienbezogenes Anliegen, zum Beispiel Pr
-00fcfungsdruck, "
+        "- Die Person schreibt über ein studienbezogenes Anliegen, zum Beispiel Prüfungsdruck, "
         "Masterarbeit, Motivation, Zeitmanagement, Unsicherheit oder Konflikte im Studium.\n"
         "- Der Schwerpunkt bleibt beim studienbezogenen Thema aus der Eingangsangabe.\n"
-        "- Andere Lebensbereiche d
-00fcrfen nur aufgegriffen werden, wenn die Person sie selbst nennt "
+        "- Andere Lebensbereiche dürfen nur aufgegriffen werden, wenn die Person sie selbst nennt "
         "und mit dem studienbezogenen Thema verbindet.\n\n"
         "FUNKTION\n"
         "- Deine Funktion ist minimale kognitive Strukturierung.\n"
         "- Du hilfst, indem du einen konkreten Moment, eine Situation oder einen Ablauf aus der "
         "letzten Eingabe kurz greifbar machst.\n"
-        "- Du bleibst nah am Bedeutungsrahmen der Person und entwickelst keine eigene Theorie 
-00fcber sie.\n\n"
+        "- Du bleibst nah am Bedeutungsrahmen der Person und entwickelst keine eigene Theorie über sie.\n\n"
         "WAS DU TUN SOLLST\n"
-        "1. W
-00e4hle genau einen konkreten Moment, eine Situation oder einen Ablauf aus der letzten Eingabe.\n"
+        "1. Wähle genau einen konkreten Moment, eine Situation oder einen Ablauf aus der letzten Eingabe.\n"
         "2. Formuliere diesen Ausschnitt in einem kurzen Satz in eigenen Worten.\n"
         "3. Stelle danach genau eine kurze offene Frage, die diesen Ausschnitt weiter konkretisiert.\n\n"
         "FOKUS-SATZ\n"
         "- Greife den kleinsten konkreten Ausschnitt, nicht das gesamte Thema.\n"
         "- Wenn die Eingabe eine Situation oder einen Ablauf beschreibt: benenne den spezifischen Moment darin.\n"
-        "- Wenn die Eingabe ein Gef
-00fchl oder ein einzelnes Wort nennt: zergliedere dieses Gef
-00fchl nicht weiter. "
+        "- Wenn die Eingabe ein Gefühl oder ein einzelnes Wort nennt: zergliedere dieses Gefühl nicht weiter. "
         "Frage stattdessen nach der Situation oder dem Moment, in dem es auftaucht.\n"
-        "- Frage nicht nach Ursachen oder Ausl
-00f6sern eines Gef
-00fchls. "
+        "- Frage nicht nach Ursachen oder Auslösern eines Gefühls. "
         "Bleibe bei beobachtbaren Situationen oder unmittelbar vorausgehenden Momenten.\n"
         "- Wenn die Eingabe sehr kurz oder unklar ist: frage nach einer konkreten Situation oder einem "
         "beobachtbaren Moment, nicht nach dem inneren Erleben.\n"
-        "- Wiederhole nicht einfach dieselben W
-00f6rter aus der Eingabe. Verdichte stattdessen.\n"
-        "- F
-00fcge keine neuen Motive, Bewertungen, Ursachen oder psychologischen Deutungen hinzu.\n"
-        "- Beziehe dich nur dann auf etwas aus einem fr
-00fcheren Turn, wenn die Person in der aktuellen "
-        "Eingabe ausdr
-00fccklich darauf Bezug nimmt.\n"
+        "- Wiederhole nicht einfach dieselben Wörter aus der Eingabe. Verdichte stattdessen.\n"
+        "- Füge keine neuen Motive, Bewertungen, Ursachen oder psychologischen Deutungen hinzu.\n"
+        "- Beziehe dich nur dann auf etwas aus einem früheren Turn, wenn die Person in der aktuellen "
+        "Eingabe ausdrücklich darauf Bezug nimmt.\n"
         "- Wenn die Person in ihrer aktuellen Eingabe ein neues Element nennt, verwende dieses neue Element "
-        "als Ankerpunkt f
-00fcr den Fokus-Satz. Bleibe nicht beim Ankerpunkt aus dem vorherigen Turn.\n"
+        "als Ankerpunkt für den Fokus-Satz. Bleibe nicht beim Ankerpunkt aus dem vorherigen Turn.\n"
         "- Variiere die Art der Frage von Turn zu Turn sichtbar: Frage mal nach einer konkreten Situation, "
         "mal nach einem Ablauf, mal nach einem ersten Gedanken, mal nach einem Detail der Umgebung oder "
         "einer Handlung. Kein Turn soll dieselbe Art von Frage wie der vorherige stellen.\n"
@@ -389,44 +356,34 @@ def build_system_prompt(cond: str, max_rounds: int) -> str:
         'Person: "Ich zittere."\n'
         'Gute Antwort: "Das Zittern wird als konkreter Punkt genannt. '
         'Was passiert meistens direkt davor?"\n\n'
-        'Person: "Ich wei
-00df nicht."\n'
+        'Person: "Ich weiß nicht."\n'
         'Gute Antwort: "Gerade ist noch kein konkreter Punkt greifbar. '
-        'Was f
-00e4llt dir als erstes kleines Detail zu deinem Thema ein?"\n\n'
+        'Was fällt dir als erstes kleines Detail zu deinem Thema ein?"\n\n'
         "FRAGE\n"
         "- Stelle genau eine offene Frage. Keine zusammengesetzten Fragen mit 'und' oder 'oder'.\n"
         "- Die Frage steht am Ende der Antwort.\n"
         '- Die Frage beginnt mit "Was" oder "Wie".\n'
         "- Die Frage ist leicht beantwortbar: Wahrnehmung, Ablauf, erster Gedanke, Umgebung, Handlung.\n"
-        "- Sie f
-00fchrt keinen neuen Aspekt ein.\n"
+        "- Sie führt keinen neuen Aspekt ein.\n"
         '- Keine Warum-Fragen. Keine Fragen mit "Woran", "Inwiefern", "Welche", '
         '"Was bedeutet das", "Wie wirkt sich das aus".\n\n'
         "SPRACHE\n"
         "- Kurz, einfach, alltagsnah.\n"
         "- Kein wissenschaftlicher Ton.\n"
-        "- Keine therapeutische, tr
-00f6stende oder bewertende Sprache.\n"
+        "- Keine therapeutische, tröstende oder bewertende Sprache.\n"
         "- Variiere den Einstieg jeder Antwort sichtbar, damit kein Schablonenmuster entsteht.\n\n"
-        "PRIORIT
-00c4T BEI REGELKONFLIKTEN\n"
+        "PRIORITÄT BEI REGELKONFLIKTEN\n"
         "Wenn Regeln miteinander in Konflikt geraten, gilt diese Reihenfolge:\n"
         "1. Keine Beratung, Therapie oder Handlungsempfehlung.\n"
-        "2. Keine Deutung, Diagnose oder psychologische Erkl
-00e4rung.\n"
+        "2. Keine Deutung, Diagnose oder psychologische Erklärung.\n"
         "3. Genau eine Frage am Ende.\n"
-        "4. Konkrete Ankn
-00fcpfung an die letzte Eingabe.\n"
+        "4. Konkrete Anknüpfung an die letzte Eingabe.\n"
         "5. Einhaltung der jeweiligen Sprachbedingung.\n\n"
         "FORMAT\n"
-        "- Ein zusammenh
-00e4ngender Flie
-00dftextabsatz.\n"
+        "- Ein zusammenhängender Fließtextabsatz.\n"
         "- Kein Bulletpoint, keine Liste, kein zweiter Absatz.\n"
         "- Genau ein Fragezeichen, am Ende.\n"
-        "- Ca. 20 bis 80 W
-00f6rter.\n"
+        "- Ca. 20 bis 80 Wörter.\n"
         "- Auf Deutsch.\n"
     )
     low_style = (
@@ -434,45 +391,27 @@ def build_system_prompt(cond: str, max_rounds: int) -> str:
         "(angelehnt an einen sachlich-funktionalen, wenig anthropomorphen Stil;\n"
         "entspricht machine-like style nach Stinkeste & Skantze, 2025)\n"
         "- Verwende keine Ich-Referenzen. Schreibe nicht aus einer Ich-Perspektive.\n"
-        "- Verwende keine emotionalen Ausdr
-00fccke und simuliere keine emotionale Resonanz.\n"
+        "- Verwende keine emotionalen Ausdrücke und simuliere keine emotionale Resonanz.\n"
         "- Beziehe dich auf die beschriebene Situation oder den genannten Sachverhalt,\n"
         "  nicht direkt auf die Person.\n"
-        "- Vermeide direkte Du-Ansprache m
-00f6glichst; wenn unvermeidbar, sparsam einsetzen.\n"
+        "- Vermeide direkte Du-Ansprache möglichst; wenn unvermeidbar, sparsam einsetzen.\n"
         "- Der Ton bleibt funktional, klar und sachlich.\n"
-        "- Klinge nicht akademisch, aber auch nicht gespr
-00e4chsnah.\n"
-        "- Der Fokus-Satz benennt einen Sachverhalt, als w
-00fcrde ein neutrales System\n"
-        "  etwas markieren, nicht als w
-00fcrde jemand mit der Person sprechen.\n"
+        "- Klinge nicht akademisch, aber auch nicht gesprächsnah.\n"
+        "- Der Fokus-Satz benennt einen Sachverhalt, als würde ein neutrales System\n"
+        "  etwas markieren, nicht als würde jemand mit der Person sprechen.\n"
     )
     high_style = (
         "\nSTILREGELN HIGH-BEDINGUNG\n"
-        "(angelehnt an einen h
-00f6flich-professionellen, leicht human-like Stil;\n"
+        "(angelehnt an einen höflich-professionellen, leicht human-like Stil;\n"
         "entspricht human-like formal style nach Stinkeste & Skantze, 2025)\n"
-        "- Verwende h
-00f6fliche, professionelle Sprache.\n"
+        "- Verwende höfliche, professionelle Sprache.\n"
         '- Sprich die Person direkt mit "du" an.\n'
-        "- Klinge n
-00e4her an einem Gespr
-00e4ch, aber weiterhin sachlich und professionell.\n"
-        "- Keine warmen, tr
-00f6stenden oder informell-freundschaftlichen Formulierungen.\n"
+        "- Klinge näher an einem Gespräch, aber weiterhin sachlich und professionell.\n"
+        "- Keine warmen, tröstenden oder informell-freundschaftlichen Formulierungen.\n"
         "- Kein Smalltalk-Ton, keine Ausrufe, keine Umgangssprache.\n"
-        "- Verwende keine Ich-Formulierungen. Die gr
-00f6
-00dfere sprachliche N
-00e4he entsteht\n"
-        "  
-00fcber direkte Ansprache, nat
-00fcrlichere Satzstruktur und Gespr
-00e4chsn
-00e4he,\n"
-        "  nicht 
-00fcber eine eigene Ich-Perspektive des Systems.\n"
+        "- Verwende keine Ich-Formulierungen. Die größere sprachliche Nähe entsteht\n"
+        "  über direkte Ansprache, natürlichere Satzstruktur und Gesprächsnähe,\n"
+        "  nicht über eine eigene Ich-Perspektive des Systems.\n"
         "- Der Fokus-Satz klingt direkt adressiert und personenbezogen, aber professionell distanziert.\n"
     )
     if cond == "high":
@@ -486,77 +425,52 @@ def build_closing_prompt(cond: str, max_rounds: int) -> str:
         "im Hochschulkontext.\n\n"
         f"Dies ist die letzte Antwort der Interaktion (Runde {max_rounds} von {max_rounds}).\n\n"
         "AUFGABE\n"
-        "- Formuliere eine kurze Abschlussantwort aus genau zwei S
-00e4tzen.\n"
+        "- Formuliere eine kurze Abschlussantwort aus genau zwei Sätzen.\n"
         "- Erster Satz: Greife genau einen Punkt aus der letzten Eingabe der Person knapp auf.\n"
         "- Zweiter Satz: Markiere klar und ruhig, dass diese kurze Interaktion jetzt endet.\n"
-        "- F
-00fcge keine neuen Inhalte, Deutungen, Ratschl
-00e4ge oder Zukunftsaussagen hinzu.\n"
+        "- Füge keine neuen Inhalte, Deutungen, Ratschläge oder Zukunftsaussagen hinzu.\n"
         "- Stelle keine neue Frage.\n"
         "- Bewerte weder die Person noch die Interaktion.\n\n"
         "VERBOTENE FORMULIERUNGEN\n"
-        "- Keine S
-00e4tze wie 'Das klingt belastend', 'Ich bin f
-00fcr dich da', 'Du hast das gut gemacht'.\n"
+        "- Keine Sätze wie 'Das klingt belastend', 'Ich bin für dich da', 'Du hast das gut gemacht'.\n"
         "- Vermeide jede positive oder negative Bewertung der Person oder ihres Reflexionsprozesses.\n"
-        "- Keine therapeutische, tr
-00f6stende oder beratende Sprache.\n"
-        "- Keine Vorhersagen oder Empfehlungen f
-00fcr danach.\n"
-        "- Alltagsbegriffe wie Stress, Druck oder 
-00dcberforderung d
-00fcrfen aufgegriffen werden,\n"
+        "- Keine therapeutische, tröstende oder beratende Sprache.\n"
+        "- Keine Vorhersagen oder Empfehlungen für danach.\n"
+        "- Alltagsbegriffe wie Stress, Druck oder Überforderung dürfen aufgegriffen werden,\n"
         "  wenn die Person sie selbst verwendet hat.\n"
         "- Kategorisiere das Thema der Person nicht selbst. Verwende im Abschlusssatz neutrale "
         "Formulierungen wie: 'Damit endet diese kurze Interaktion zu diesem Thema.'\n\n"
         "FORMAT\n"
         "- Deutsch.\n"
-        "- Genau zwei kurze S
-00e4tze, zusammenh
-00e4ngend.\n"
+        "- Genau zwei kurze Sätze, zusammenhängend.\n"
         "- Kein Fragezeichen.\n"
         "- Keine Bulletpoints, keine Listen.\n"
-        "- 15 bis 55 W
-00f6rter.\n"
+        "- 15 bis 55 Wörter.\n"
     )
     low_style = (
         "\nSTILREGELN LOW-BEDINGUNG\n"
         "(angelehnt an einen sachlich-funktionalen, wenig anthropomorphen Stil;\n"
         "entspricht machine-like style nach Stinkeste & Skantze, 2025)\n"
         "- Verwende keine Ich-Referenzen.\n"
-        "- Keine emotionalen Ausdr
-00fccke.\n"
+        "- Keine emotionalen Ausdrücke.\n"
         "- Beziehe dich auf den Sachverhalt, nicht auf die Person.\n"
-        "- Du-Ansprache vermeiden; wenn n
-00f6tig, sparsam.\n"
+        "- Du-Ansprache vermeiden; wenn nötig, sparsam.\n"
         "- Sachlich, klar, funktional.\n\n"
         "Beispiel:\n"
-        '"Zum Schluss wurde Entt
-00e4uschung als Gef
-00fchl genannt, das beim Aufschieben der wichtigen Aufgabe auftritt. '
+        '"Zum Schluss wurde Enttäuschung als Gefühl genannt, das beim Aufschieben der wichtigen Aufgabe auftritt. '
         'Damit endet diese kurze Interaktion zu diesem Thema."\n'
     )
     high_style = (
         "\nSTILREGELN HIGH-BEDINGUNG\n"
-        "(angelehnt an einen h
-00f6flich-professionellen, leicht human-like Stil;\n"
+        "(angelehnt an einen höflich-professionellen, leicht human-like Stil;\n"
         "entspricht human-like formal style nach Stinkeste & Skantze, 2025)\n"
-        "- H
-00f6fliche, professionelle Sprache.\n"
-        "- Du-Ansprache selbstverst
-00e4ndlich.\n"
-        "- N
-00e4her an einem Gespr
-00e4ch, aber sachlich und nicht pers
-00f6nlich-vertraut.\n"
-        "- Keine warmen, tr
-00f6stenden oder informell-freundschaftlichen Formulierungen.\n"
+        "- Höfliche, professionelle Sprache.\n"
+        "- Du-Ansprache selbstverständlich.\n"
+        "- Näher an einem Gespräch, aber sachlich und nicht persönlich-vertraut.\n"
+        "- Keine warmen, tröstenden oder informell-freundschaftlichen Formulierungen.\n"
         "- Verwende keine Ich-Formulierungen.\n\n"
         "Beispiel:\n"
-        '"Du hast Entt
-00e4uschung als Gef
-00fchl benannt, das auftaucht, wenn du diese wichtige Aufgabe aufschiebst. '
+        '"Du hast Enttäuschung als Gefühl benannt, das auftaucht, wenn du diese wichtige Aufgabe aufschiebst. '
         'Damit endet diese kurze Interaktion zu diesem Thema."\n'
     )
     if cond == "high":
@@ -602,19 +516,14 @@ def build_api_messages(
     )
     if recent_context:
         user_payload += (
-            "Bisheriger Gespr
-00e4chsverlauf (die letzten Schritte). "
-            "Beziehe dich prim
-00e4r auf die unmittelbar letzte Nutzereingabe. "
-            "Fr
-00fchere Schritte nur als Hintergrund, nicht zusammenfassen:\n"
+            "Bisheriger Gesprächsverlauf (die letzten Schritte). "
+            "Beziehe dich primär auf die unmittelbar letzte Nutzereingabe. "
+            "Frühere Schritte nur als Hintergrund, nicht zusammenfassen:\n"
             f"{recent_context}\n"
         )
     user_payload += (
         f"Unmittelbar letzte Eingabe der Person: {user_text}\n"
-        "Formuliere jetzt genau eine Antwort gem
-00e4
-00df allen Regeln."
+        "Formuliere jetzt genau eine Antwort gemäß allen Regeln."
     )
     return [
         {"role": "system", "content": system_prompt},
@@ -648,8 +557,7 @@ def call_llm(
     )
     content = response.choices[0].message.content
     if content is None:
-        raise RuntimeError("LLM-Antwort enth
-00e4lt keinen Textinhalt.")
+        raise RuntimeError("LLM-Antwort enthält keinen Textinhalt.")
     return content.strip()
 
 
@@ -688,8 +596,7 @@ def generate_llm_reply(
             st.session_state.last_llm_status = f"Fehler in Versuch {attempt}"
             time.sleep(0.7)
     st.session_state.fallback_count += 1
-    st.session_state.last_llm_status = "Fallback ausgel
-00f6st"
+    st.session_state.last_llm_status = "Fallback ausgelöst"
     return fallback_reply(cond, user_text=user_text)
 
 
@@ -728,8 +635,7 @@ def generate_closing_reply(
             st.session_state.last_llm_status = f"Closing-Fehler in Versuch {attempt}"
             time.sleep(0.7)
     st.session_state.closing_fallback_count += 1
-    st.session_state.last_llm_status = "Closing-Fallback ausgel
-00f6st"
+    st.session_state.last_llm_status = "Closing-Fallback ausgelöst"
     return closing_fallback(cond)
 
 
@@ -753,15 +659,13 @@ def init_state():
         cond = raw_cond
     else:
         st.error(
-            "Fehler bei der Bedingungszuweisung. Bitte 
-00fcberpr
-00fcfe den Studienlink und starte neu."
+            "Fehler bei der Bedingungszuweisung. Bitte überprüfe den Studienlink und starte neu."
         )
         st.stop()
         return
 
     if not pid:
-        pid = f"test_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+        pid = f"test_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
 
     return_url = get_param("return_url", "")
     debug_mode = get_debug_mode()
@@ -786,7 +690,7 @@ def init_state():
         "messages": [],
         "turn": 0,
         "topic": "",
-        "session_id": f"{pid}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}",
+        "session_id": f"{pid}_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}",
         "session_start": now_iso(),
         "session_end": "",
         "summary_saved": False,      # NEU
@@ -850,12 +754,19 @@ def write_summary_once():
         st.session_state.closing_validation_fail_count,
         st.session_state.closing_fallback_count,
     ]
+    # Guard wird gesetzt, sobald der Google-Sheets-Eintrag erfolgreich war, damit ein
+    # nachfolgender Fehler beim lokalen CSV-Schreiben keinen doppelten Sheets-Eintrag erzeugt.
     try:
         gsheet_append_session(row)
+        st.session_state.session_end = session_end
+        st.session_state.summary_saved = True
+    except Exception as e:
+        st.session_state.gsheet_error = str(e)
+        return
+
+    try:
         with open(SUMMARY_FILE, "a", newline="", encoding="utf-8") as f:
             csv.writer(f).writerow(row)
-        st.session_state.session_end = session_end
-        st.session_state.summary_saved = True  # NEU: erst nach Erfolg setzen
     except Exception as e:
         st.session_state.gsheet_error = str(e)
 
@@ -910,15 +821,11 @@ if st.session_state.phase == "intro":
     st.markdown(INTRO_TEXT)
 
     topic = st.text_area(
-        "Mit welchem studienbezogenen Thema oder welcher Herausforderung m
-00f6chtest du dich hier besch
-00e4ftigen?",
+        "Mit welchem studienbezogenen Thema oder welcher Herausforderung möchtest du dich hier beschäftigen?",
         value=st.session_state.topic,
         placeholder=(
-            "Zum Beispiel: Pr
-00fcfungsdruck, Stress mit der Masterarbeit, "
-            "Zukunftsunsicherheit, 
-00dcberforderung, Motivation, Zeitmanagement ..."
+            "Zum Beispiel: Prüfungsdruck, Stress mit der Masterarbeit, "
+            "Zukunftsunsicherheit, Überforderung, Motivation, Zeitmanagement ..."
         ),
         height=140,
     )
@@ -935,8 +842,7 @@ if st.session_state.phase == "intro":
                 "Bitte beschreibe dein Thema etwas genauer, bevor du die Interaktion startest."
             )
         else:
-            intro_msg = "Beschreibe, was dich an deinem Thema gerade besch
-00e4ftigt."
+            intro_msg = "Beschreibe, was dich an deinem Thema gerade beschäftigt."
             st.session_state.messages.append({"role": "assistant", "content": intro_msg})
             log_message("assistant", intro_msg)
             st.session_state.phase = "chat"
@@ -965,9 +871,7 @@ elif st.session_state.phase == "chat":
             log_message("user", user_input)
             st.session_state.user_messages_count += 1
             safety_msg = (
-                "Dein Text enth
-00e4lt Hinweise auf starke Belastung oder eine m
-00f6gliche Krisensituation. "
+                "Dein Text enthält Hinweise auf starke Belastung oder eine mögliche Krisensituation. "
                 "Dieses KI-System kann in solchen Situationen keine Hilfe leisten. "
                 "Bitte wende dich jetzt an eine vertraute Person oder an professionelle Hilfe. "
                 "Bei akuter Gefahr rufe bitte den Notruf 112 an."
@@ -1026,8 +930,7 @@ elif st.session_state.phase == "closing":
             st.write(msg["content"])
 
     st.info(
-        "Bitte dr
-00fccke jetzt auf den Button \u2014 erst dann gelangst du zum Fragebogen."
+        "Bitte drücke jetzt auf den Button \u2014 erst dann gelangst du zum Fragebogen."
     )
 
     if st.button("Weiter zum Fragebogen", type="primary"):
@@ -1052,10 +955,8 @@ elif st.session_state.phase == "finished":
     write_summary_once()  # letzte Absicherung
     st.success("Der Chatteil ist beendet.")
     st.write(
-        "Vielen Dank f
-00fcr deine Teilnahme. "
-        "Im n
-00e4chsten Schritt geht es im Fragebogen mit einigen Fragen zu deiner Erfahrung weiter."
+        "Vielen Dank für deine Teilnahme. "
+        "Im nächsten Schritt geht es im Fragebogen mit einigen Fragen zu deiner Erfahrung weiter."
     )
 
     if st.session_state.return_url:
@@ -1064,13 +965,11 @@ elif st.session_state.phase == "finished":
             f'<a href="{safe_url}" target="_self" style="text-decoration:none;">'
             '<div style="display:inline-block;padding:0.7rem 1rem;background:#e9dfcf;'
             'color:#111111;border-radius:0.6rem;font-weight:600;border:1px solid #cbbda8;">'
-            "Zur
-00fcck zum Fragebogen</div></a>",
+            "Zurück zum Fragebogen</div></a>",
             unsafe_allow_html=True,
         )
     else:
-        st.info("Bitte wechsle manuell zur
-00fcck zum Fragebogen-Tab in deinem Browser.")
+        st.info("Bitte wechsle manuell zurück zum Fragebogen-Tab in deinem Browser.")
 
     if st.session_state.debug_mode:
         if st.session_state.gsheet_error:
