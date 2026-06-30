@@ -1009,7 +1009,7 @@ elif st.session_state.phase == "closing":
 
     st.info(
         "Die kurze Interaktion zu deinem studienbezogenen Thema ist jetzt abgeschlossen. "
-        "Bitte kehre nun zum Fragebogen zurück und beantworte dort die weiteren Fragen zu deiner Erfahrung mit dem Chat."
+        "Bitte klicke jetzt auf den Button, um zum Fragebogen zurückzukehren."
     )
 
     if st.button("Weiter zum Fragebogen", type="primary"):
