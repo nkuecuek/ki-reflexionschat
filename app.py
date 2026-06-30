@@ -4,7 +4,7 @@ import string
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict
+from typing import Dict, List
 from urllib.parse import quote
 
 import gspread
@@ -78,10 +78,12 @@ def get_openai_client() -> OpenAI:
                 break
         except Exception:
             pass
+
     if not api_key:
         raise RuntimeError(
             "Kein API-Key gefunden. Erwartet wird OPENAI_API_KEY oder LLM_API_KEY in st.secrets."
         )
+
     base_url = st.secrets.get("LLM_BASE_URL", "https://api.openai.com/v1")
     return OpenAI(api_key=api_key, base_url=base_url)
 
@@ -102,8 +104,7 @@ def get_gsheet(tab_name: str):
     try:
         return spreadsheet.worksheet(tab_name)
     except gspread.WorksheetNotFound:
-        ws = spreadsheet.add_worksheet(title=tab_name, rows=1000, cols=20)
-        return ws
+        return spreadsheet.add_worksheet(title=tab_name, rows=1000, cols=20)
 
 
 def ensure_gsheet_headers():
@@ -141,21 +142,29 @@ def ensure_gsheet_headers():
 
 
 def gsheet_append_log(row: list):
-    try:
-        ws = get_gsheet("chat_logs")
-        ws.append_row(row, value_input_option="RAW")
-    except Exception as e:
-        st.session_state.setdefault("gsheet_error", "")
-        st.session_state["gsheet_error"] = str(e)
+    for attempt in range(3):
+        try:
+            ws = get_gsheet("chat_logs")
+            ws.append_row(row, value_input_option="RAW")
+            return
+        except Exception as e:
+            if attempt == 2:
+                st.session_state.setdefault("gsheet_error", "")
+                st.session_state["gsheet_error"] = str(e)
+            time.sleep(1)
 
 
 def gsheet_append_session(row: list):
-    try:
-        ws = get_gsheet("chat_sessions")
-        ws.append_row(row, value_input_option="RAW")
-    except Exception as e:
-        st.session_state.setdefault("gsheet_error", "")
-        st.session_state["gsheet_error"] = str(e)
+    for attempt in range(3):
+        try:
+            ws = get_gsheet("chat_sessions")
+            ws.append_row(row, value_input_option="RAW")
+            return
+        except Exception as e:
+            if attempt == 2:
+                st.session_state.setdefault("gsheet_error", "")
+                st.session_state["gsheet_error"] = str(e)
+            time.sleep(1)
 
 
 def get_model_name() -> str:
@@ -172,6 +181,7 @@ def ensure_csv_files():
             csv.writer(f).writerow(
                 ["session_id", "pid", "cond", "turn", "role", "text", "timestamp"]
             )
+
     if not SUMMARY_FILE.exists():
         with open(SUMMARY_FILE, "w", newline="", encoding="utf-8") as f:
             csv.writer(f).writerow(
@@ -223,8 +233,10 @@ def is_very_short_user_input(text: str) -> bool:
 def validate_response(text: str) -> bool:
     if not text:
         return False
+
     raw = (text or "").strip()
     normalized = " ".join(raw.replace("\n", " ").split()).strip()
+
     if not normalized:
         return False
     if "\n" in raw:
@@ -235,41 +247,88 @@ def validate_response(text: str) -> bool:
         return False
     if not normalized.endswith("?"):
         return False
+
     words = normalized.split()
     if len(words) < 10 or len(words) > 80:
         return False
+
     lower = normalized.lower()
     if any(phrase in lower for phrase in FORBIDDEN_PHRASES):
         return False
+
     question_match = re.search(r"(Was|Wie)\b[^?]*\?$", normalized)
     if not question_match:
         return False
+
     return True
 
 
 def validate_closing_response(text: str) -> bool:
     if not text:
         return False
+
     normalized = " ".join((text or "").replace("\n", " ").split()).strip()
+
     if not normalized:
         return False
     if "?" in normalized:
         return False
     if any(sep in text for sep in ["\n", "- ", "•", "*"]):
         return False
+
     words = normalized.split()
     if len(words) < 10 or len(words) > 60:
         return False
+
     lower = normalized.lower()
     if any(phrase in lower for phrase in FORBIDDEN_PHRASES):
         return False
+
     return True
 
 
 def fallback_reply(cond: str, user_text: str = "") -> str:
-    if cond == "high":
-        return "Ein konkreter Punkt ist noch nicht ganz greifbar. Was fällt dir dazu zuerst ein?"
-    return "Ein konkreter Aspekt wurde noch nicht eindeutig benannt. Was lässt sich zuerst beschreiben?"
+    short = (user_text or "").strip().lower()
+
+    unsure_forms = {
+        "ich weiß nicht",
+        "ich weiss nicht",
+        "weiß nicht",
+        "weiss nicht",
+        "keine ahnung",
+        "nicht sicher",
+        "kp",
+        "idk",
+        "schwer zu sagen",
+        "unsicher",
+    }
+
+    if short in unsure_forms or is_very_short_user_input(user_text):
+        variants_high = [
+            "Im Moment bleibt noch offen, woran du dieses studienbezogene Thema zuerst festmachst. Wenn du an den Anfang denkst, was fällt dir dort als Erstes auf?",
+            "Gerade ist noch schwer zu greifen, an welchem Punkt dein studienbezogenes Thema konkret beginnt. Wenn du an diese Situation denkst, was ist zuerst bemerkbar?",
+            "Noch ist nicht klar, welcher Teil deines studienbezogenen Themas im Moment am ehesten greifbar wird. Wenn du an den Anfang denkst, was taucht zuerst auf?",
+        ]
+        variants_low = [
+            "Im Moment bleibt noch unklar, welcher konkrete Punkt an diesem studienbezogenen Thema zuerst greifbar wird. Wenn du an die Situation denkst, was fällt als Erstes auf?",
+            "Noch ist offen, an welchem Punkt dieses studienbezogene Thema im Alltag zuerst sichtbar wird. Wenn du an den Anfang denkst, was lässt sich zuerst benennen?",
+            "Der erste konkrete Ansatzpunkt in diesem studienbezogenen Thema bleibt noch unscharf. Was fällt dir an dieser Situation zuerst auf?",
+        ]
+        pool = variants_high if cond == "high" else variants_low
+        return pool[st.session_state.turn % len(pool)]
+
+    variants_high = [
+        "Mehrere Punkte rund um dein studienbezogenes Thema stehen gerade nebeneinander. Wenn du an die aktuelle Situation denkst, was tritt zuerst hervor?",
+        "In deiner Beschreibung laufen gerade verschiedene studienbezogene Punkte zusammen. Wenn du an diesen Moment denkst, was ist am deutlichsten bemerkbar?",
+        "Gerade kommen mehrere Aspekte deines studienbezogenen Themas gleichzeitig vor. Was fällt in dieser Situation zuerst auf?",
+    ]
+    variants_low = [
+        "Mehrere Punkte rund um das studienbezogene Thema werden hier gleichzeitig beschrieben. Wenn du an die aktuelle Situation denkst, was tritt zuerst hervor?",
+        "In der Beschreibung laufen verschiedene Aspekte des studienbezogenen Themas zusammen. Was ist in diesem Moment am deutlichsten bemerkbar?",
+        "Hier werden mehrere studienbezogene Punkte nebeneinander sichtbar. Was fällt in dieser Situation zuerst auf?",
+    ]
+    pool = variants_high if cond == "high" else variants_low
+    return pool[st.session_state.turn % len(pool)]
 
 
 def closing_fallback(cond: str) -> str:
@@ -326,7 +385,13 @@ def build_system_prompt(cond: str, max_rounds: int) -> str:
         "- Wiederhole nicht einfach dieselben Wörter aus der Eingabe. Verdichte stattdessen.\n"
         "- Füge keine neuen Motive, Bewertungen, Ursachen oder psychologischen Deutungen hinzu.\n"
         "- Beziehe dich nur dann auf etwas aus einem früheren Turn, wenn die Person in der aktuellen "
-        "Eingabe ausdrücklich darauf Bezug nimmt.\n\n"
+        "Eingabe ausdrücklich darauf Bezug nimmt.\n"
+        "- Wenn die Person in ihrer aktuellen Eingabe ein neues Element nennt, verwende dieses neue Element "
+        "als Ankerpunkt für den Fokus-Satz. Bleibe nicht beim Ankerpunkt aus dem vorherigen Turn.\n"
+        "- Variiere die Art der Frage von Turn zu Turn sichtbar: Frage mal nach einer konkreten Situation, "
+        "mal nach einem Ablauf, mal nach einem ersten Gedanken, mal nach einem Detail der Umgebung oder "
+        "einer Handlung. Kein Turn soll dieselbe Art von Frage wie der vorherige stellen.\n"
+        "- Ziel ist kognitive Strukturierung, nicht emotionale Resonanz.\n\n"
         "BEISPIELE\n"
         'Person: "Ich sitze vor dem Laptop und bekomme nichts geschrieben."\n'
         'Gute Antwort: "Der Moment vor dem Laptop bleibt noch ohne klaren Anfang. '
@@ -424,12 +489,6 @@ def build_closing_prompt(cond: str, max_rounds: int) -> str:
         "  wenn die Person sie selbst verwendet hat.\n"
         "- Kategorisiere das Thema der Person nicht selbst. Verwende im Abschlusssatz neutrale "
         "Formulierungen wie: 'Damit endet diese kurze Interaktion zu diesem Thema.'\n\n"
-        "PRIORITÄT BEI REGELKONFLIKTEN\n"
-        "1. Keine Beratung, Therapie oder Handlungsempfehlung.\n"
-        "2. Keine Deutung oder psychologische Erklärung.\n"
-        "3. Kein Fragezeichen.\n"
-        "4. Abschlusscharakter deutlich erkennbar.\n"
-        "5. Einhaltung der jeweiligen Sprachbedingung.\n\n"
         "FORMAT\n"
         "- Deutsch.\n"
         "- Genau zwei kurze Sätze, zusammenhängend.\n"
@@ -486,6 +545,7 @@ def get_recent_context(messages: List[Dict[str, str]], max_pairs: int = 2) -> st
             i += 2
         else:
             i += 1
+
     recent = pairs[-max_pairs:]
     lines = []
     for u, a in recent:
@@ -503,10 +563,12 @@ def build_api_messages(
     user_text: str,
 ) -> List[Dict[str, str]]:
     recent_context = get_recent_context(st.session_state.messages, max_pairs=2)
+
     user_payload = (
         f"Studienbezogenes Hauptthema der Person: {topic}\n"
         f"Aktuelle Rundenzahl: {turn} von {max_rounds}\n"
     )
+
     if recent_context:
         user_payload += (
             "Bisheriger Gesprächsverlauf (die letzten Schritte). "
@@ -514,10 +576,12 @@ def build_api_messages(
             "Frühere Schritte nur als Hintergrund, nicht zusammenfassen:\n"
             f"{recent_context}\n"
         )
+
     user_payload += (
         f"Unmittelbar letzte Eingabe der Person: {user_text}\n"
         "Formuliere jetzt genau eine Antwort gemäß allen Regeln."
     )
+
     return [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_payload},
@@ -534,6 +598,7 @@ def call_llm(
 ) -> str:
     client = get_openai_client()
     model_name = get_model_name()
+
     messages = build_api_messages(
         system_prompt=system_prompt,
         topic=topic,
@@ -541,16 +606,20 @@ def call_llm(
         max_rounds=max_rounds,
         user_text=user_text,
     )
+
     st.session_state.last_prompt_excerpt = messages[-1]["content"]
+
     response = client.chat.completions.create(
         model=model_name,
         messages=messages,
         temperature=temperature,
         max_tokens=180,
     )
+
     content = response.choices[0].message.content
     if content is None:
         raise RuntimeError("LLM-Antwort enthält keinen Textinhalt.")
+
     return content.strip()
 
 
@@ -558,10 +627,13 @@ def generate_llm_reply(
     user_text: str, cond: str, topic: str, turn: int, max_rounds: int
 ) -> str:
     system_prompt = build_system_prompt(cond=cond, max_rounds=max_rounds)
+
     st.session_state.last_llm_error = ""
     st.session_state.last_llm_raw_reply = ""
     st.session_state.last_llm_status = ""
+
     temperatures = [0.3, 0.2, 0.1][:MAX_RETRIES]
+
     for attempt, temp in enumerate(temperatures, start=1):
         try:
             raw_reply = call_llm(
@@ -572,18 +644,27 @@ def generate_llm_reply(
                 user_text=user_text,
                 temperature=temp,
             )
+
             st.session_state.last_llm_raw_reply = raw_reply
+
             if validate_response(raw_reply):
                 st.session_state.last_llm_status = f"LLM ok in Versuch {attempt}"
                 return " ".join(raw_reply.split())
+
             st.session_state.validation_fail_count += 1
             st.session_state.last_llm_error = (
                 f"Validierung fehlgeschlagen in Versuch {attempt}: {raw_reply}"
             )
+            st.session_state.last_llm_status = (
+                f"Validierung fehlgeschlagen in Versuch {attempt}"
+            )
             time.sleep(0.4)
+
         except Exception as e:
             st.session_state.last_llm_error = f"{type(e).__name__}: {e}"
+            st.session_state.last_llm_status = f"Fehler in Versuch {attempt}"
             time.sleep(0.7)
+
     st.session_state.fallback_count += 1
     st.session_state.last_llm_status = "Fallback ausgelöst"
     return fallback_reply(cond, user_text=user_text)
@@ -593,10 +674,13 @@ def generate_closing_reply(
     user_text: str, cond: str, topic: str, turn: int, max_rounds: int
 ) -> str:
     system_prompt = build_closing_prompt(cond=cond, max_rounds=max_rounds)
+
     st.session_state.last_llm_error = ""
     st.session_state.last_llm_raw_reply = ""
     st.session_state.last_llm_status = ""
+
     temperatures = [0.2, 0.1, 0.0][:MAX_RETRIES]
+
     for attempt, temp in enumerate(temperatures, start=1):
         try:
             raw_reply = call_llm(
@@ -607,18 +691,27 @@ def generate_closing_reply(
                 user_text=user_text,
                 temperature=temp,
             )
+
             st.session_state.last_llm_raw_reply = raw_reply
+
             if validate_closing_response(raw_reply):
                 st.session_state.last_llm_status = f"Closing ok in Versuch {attempt}"
                 return " ".join(raw_reply.split())
+
             st.session_state.closing_validation_fail_count += 1
             st.session_state.last_llm_error = (
                 f"Closing-Validierung fehlgeschlagen in Versuch {attempt}: {raw_reply}"
             )
+            st.session_state.last_llm_status = (
+                f"Closing-Validierung fehlgeschlagen in Versuch {attempt}"
+            )
             time.sleep(0.4)
+
         except Exception as e:
             st.session_state.last_llm_error = f"{type(e).__name__}: {e}"
+            st.session_state.last_llm_status = f"Closing-Fehler in Versuch {attempt}"
             time.sleep(0.7)
+
     st.session_state.closing_fallback_count += 1
     st.session_state.last_llm_status = "Closing-Fallback ausgelöst"
     return closing_fallback(cond)
@@ -640,10 +733,8 @@ def init_state():
         cond = "low"
     elif raw_cond == "2":
         cond = "high"
-    elif raw_cond == "low":
-        cond = "low"
-    elif raw_cond == "high":
-        cond = "high"
+    elif raw_cond in {"low", "high"}:
+        cond = raw_cond
     else:
         st.error(
             "Fehler bei der Bedingungszuweisung. Bitte überprüfe den Studienlink und starte neu."
@@ -695,6 +786,7 @@ def init_state():
         "last_prompt_excerpt": "",
         "gsheet_error": "",
     }
+
     for k, v in defaults.items():
         if k not in st.session_state:
             st.session_state[k] = v
@@ -710,7 +802,9 @@ def log_message(role: str, text: str):
         text,
         now_iso(),
     ]
+
     gsheet_append_log(row)
+
     try:
         with open(LOG_FILE, "a", newline="", encoding="utf-8") as f:
             csv.writer(f).writerow(row)
@@ -721,7 +815,9 @@ def log_message(role: str, text: str):
 def write_summary_once():
     if st.session_state.session_end:
         return
+
     st.session_state.session_end = now_iso()
+
     row = [
         st.session_state.session_id,
         st.session_state.pid,
@@ -739,7 +835,9 @@ def write_summary_once():
         st.session_state.closing_validation_fail_count,
         st.session_state.closing_fallback_count,
     ]
+
     gsheet_append_session(row)
+
     try:
         with open(SUMMARY_FILE, "a", newline="", encoding="utf-8") as f:
             csv.writer(f).writerow(row)
@@ -750,29 +848,40 @@ def write_summary_once():
 def render_debug_sidebar():
     if not st.session_state.debug_mode:
         return
+
     with st.sidebar:
         st.markdown("### Debug")
         st.write(
             {
                 "pid": st.session_state.pid,
                 "cond": st.session_state.cond,
+                "raw_cond": st.session_state.raw_cond,
                 "cond_label": get_condition_label(st.session_state.cond),
                 "rounds": st.session_state.max_rounds,
                 "turn": st.session_state.turn,
                 "phase": st.session_state.phase,
+                "pending_finish": st.session_state.pending_finish,
+                "session_id": st.session_state.session_id,
+                "model": get_model_name(),
                 "validation_fail_count": st.session_state.validation_fail_count,
                 "fallback_count": st.session_state.fallback_count,
+                "closing_validation_fail_count": st.session_state.closing_validation_fail_count,
+                "closing_fallback_count": st.session_state.closing_fallback_count,
                 "gsheet_error": st.session_state.gsheet_error,
             }
         )
+
         if st.session_state.last_llm_status:
             st.info(st.session_state.last_llm_status)
+
         if st.session_state.last_llm_error:
             st.error("Letzter LLM-Fehler")
             st.code(st.session_state.last_llm_error)
+
         if st.session_state.last_llm_raw_reply:
             st.write("Letzte rohe Modellantwort:")
             st.code(st.session_state.last_llm_raw_reply)
+
         if st.session_state.last_prompt_excerpt:
             st.write("Letzter Prompt-Ausschnitt:")
             st.code(st.session_state.last_prompt_excerpt)
@@ -789,6 +898,7 @@ st.title("KI-Chat")
 
 if st.session_state.phase == "intro":
     st.markdown(INTRO_TEXT)
+
     topic = st.text_area(
         "Mit welchem studienbezogenen Thema oder welcher Herausforderung möchtest du dich hier beschäftigen?",
         value=st.session_state.topic,
@@ -799,10 +909,12 @@ if st.session_state.phase == "intro":
         height=140,
     )
     st.session_state.topic = topic
+
     st.markdown(
         "**Hinweis:** Hilfreich ist, wenn du dein Thema so beschreibst, dass klar wird, "
         "worum es im Studium gerade geht. Diese Beschreibung dient dem Chat als Orientierung."
     )
+
     if st.button("Interaktion starten", type="primary"):
         if not validate_topic_input(topic):
             st.warning(
@@ -817,12 +929,15 @@ if st.session_state.phase == "intro":
 
 elif st.session_state.phase == "chat":
     st.subheader(f"Thema: {st.session_state.topic}")
+
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.write(msg["content"])
+
     if st.session_state.pending_finish:
         st.session_state.phase = "closing"
         st.rerun()
+
     if (
         st.session_state.turn >= st.session_state.max_rounds
         and not st.session_state.pending_finish
@@ -830,13 +945,16 @@ elif st.session_state.phase == "chat":
         st.session_state.chat_completed = True
         st.session_state.pending_finish = True
         st.rerun()
+
     user_input = st.chat_input("Schreibe hier deine Antwort ...")
+
     if user_input:
         if check_safety(user_input):
             st.session_state.safety_triggered = True
             st.session_state.messages.append({"role": "user", "content": user_input})
             log_message("user", user_input)
             st.session_state.user_messages_count += 1
+
             safety_msg = (
                 "Dein Text enthält Hinweise auf starke Belastung oder eine mögliche Krisensituation. "
                 "Dieses KI-System kann in solchen Situationen keine Hilfe leisten. "
@@ -855,6 +973,7 @@ elif st.session_state.phase == "chat":
         with st.chat_message("assistant"):
             with st.spinner("Antwort wird erzeugt ..."):
                 is_last_turn = st.session_state.turn >= st.session_state.max_rounds - 1
+
                 if is_last_turn:
                     reply = generate_closing_reply(
                         user_text=user_input,
@@ -871,6 +990,7 @@ elif st.session_state.phase == "chat":
                         turn=st.session_state.turn + 1,
                         max_rounds=st.session_state.max_rounds,
                     )
+
                 st.write(reply)
 
         st.session_state.messages.append({"role": "assistant", "content": reply})
@@ -881,17 +1001,21 @@ elif st.session_state.phase == "chat":
             st.session_state.chat_completed = True
             st.session_state.closing_logged = True
             st.session_state.pending_finish = True
+
         st.rerun()
 
 elif st.session_state.phase == "closing":
     st.subheader(f"Thema: {st.session_state.topic}")
+
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.write(msg["content"])
+
     st.info(
         "Die kurze Interaktion zu deinem studienbezogenen Thema ist jetzt abgeschlossen. "
         "Bitte kehre nun zum Fragebogen zurück und beantworte dort die weiteren Fragen zu deiner Erfahrung mit dem Chat."
     )
+
     if st.button("Weiter zum Fragebogen", type="primary"):
         st.session_state.phase = "finished"
         st.rerun()
@@ -900,10 +1024,12 @@ elif st.session_state.phase == "safety":
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.write(msg["content"])
+
     st.warning(
         "Diese Interaktion wird jetzt beendet. "
         "Bitte wende dich bei Bedarf an eine der genannten Stellen."
     )
+
     if st.button("Sitzung beenden", type="primary"):
         st.session_state.phase = "finished"
         st.rerun()
@@ -915,6 +1041,7 @@ elif st.session_state.phase == "finished":
         "Vielen Dank für deine Teilnahme. "
         "Im nächsten Schritt geht es im Fragebogen mit einigen Fragen zu deiner Erfahrung weiter."
     )
+
     if st.session_state.return_url:
         safe_url = quote(st.session_state.return_url, safe=":/?&=%#")
         st.markdown(
@@ -926,14 +1053,17 @@ elif st.session_state.phase == "finished":
         )
     else:
         st.info("Bitte wechsle manuell zurück zum Fragebogen-Tab in deinem Browser.")
+
     if st.session_state.debug_mode:
         if st.session_state.gsheet_error:
             st.error(f"Google Sheets Fehler: {st.session_state.gsheet_error}")
+
         st.markdown("### Sitzungsdaten")
         if LOG_FILE.exists():
             df = pd.read_csv(LOG_FILE)
             session_df = df[df["session_id"] == st.session_state.session_id]
             st.dataframe(session_df, use_container_width=True)
+
         if st.button("Neue Testsitzung starten"):
             for key in [
                 "phase",
