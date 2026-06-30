@@ -86,12 +86,10 @@ def get_openai_client() -> OpenAI:
                 break
         except Exception:
             pass
-
     if not api_key:
         raise RuntimeError(
             "Kein API-Key gefunden. Erwartet wird OPENAI_API_KEY oder LLM_API_KEY in st.secrets."
         )
-
     base_url = st.secrets.get("LLM_BASE_URL", "https://api.openai.com/v1")
     return OpenAI(api_key=api_key, base_url=base_url)
 
@@ -122,26 +120,15 @@ def ensure_gsheet_headers():
             logs_ws.append_row(
                 ["session_id", "pid", "cond", "turn", "role", "text", "timestamp"]
             )
-
         sessions_ws = get_gsheet("chat_sessions")
         if not sessions_ws.get_all_values():
             sessions_ws.append_row(
                 [
-                    "session_id",
-                    "pid",
-                    "cond",
-                    "raw_cond",
-                    "session_start",
-                    "session_end",
-                    "completed_chat",
-                    "turns_completed",
-                    "user_messages_count",
-                    "topic",
-                    "safety_triggered",
-                    "validation_fail_count",
-                    "fallback_count",
-                    "closing_validation_fail_count",
-                    "closing_fallback_count",
+                    "session_id", "pid", "cond", "raw_cond",
+                    "session_start", "session_end", "completed_chat",
+                    "turns_completed", "user_messages_count", "topic",
+                    "safety_triggered", "validation_fail_count", "fallback_count",
+                    "closing_validation_fail_count", "closing_fallback_count",
                 ]
             )
     except Exception as e:
@@ -150,21 +137,29 @@ def ensure_gsheet_headers():
 
 
 def gsheet_append_log(row: list):
-    try:
-        ws = get_gsheet("chat_logs")
-        ws.append_row(row, value_input_option="RAW")
-    except Exception as e:
-        st.session_state.setdefault("gsheet_error", "")
-        st.session_state["gsheet_error"] = str(e)
+    for attempt in range(3):
+        try:
+            ws = get_gsheet("chat_logs")
+            ws.append_row(row, value_input_option="RAW")
+            return
+        except Exception as e:
+            if attempt == 2:
+                st.session_state.setdefault("gsheet_error", "")
+                st.session_state["gsheet_error"] = str(e)
+            time.sleep(1)
 
 
 def gsheet_append_session(row: list):
-    try:
-        ws = get_gsheet("chat_sessions")
-        ws.append_row(row, value_input_option="RAW")
-    except Exception as e:
-        st.session_state.setdefault("gsheet_error", "")
-        st.session_state["gsheet_error"] = str(e)
+    for attempt in range(3):
+        try:
+            ws = get_gsheet("chat_sessions")
+            ws.append_row(row, value_input_option="RAW")
+            return
+        except Exception as e:
+            if attempt == 2:
+                st.session_state.setdefault("gsheet_error", "")
+                st.session_state["gsheet_error"] = str(e)
+            time.sleep(1)
 
 
 def get_model_name() -> str:
@@ -181,26 +176,15 @@ def ensure_csv_files():
             csv.writer(f).writerow(
                 ["session_id", "pid", "cond", "turn", "role", "text", "timestamp"]
             )
-
     if not SUMMARY_FILE.exists():
         with open(SUMMARY_FILE, "w", newline="", encoding="utf-8") as f:
             csv.writer(f).writerow(
                 [
-                    "session_id",
-                    "pid",
-                    "cond",
-                    "raw_cond",
-                    "session_start",
-                    "session_end",
-                    "completed_chat",
-                    "turns_completed",
-                    "user_messages_count",
-                    "topic",
-                    "safety_triggered",
-                    "validation_fail_count",
-                    "fallback_count",
-                    "closing_validation_fail_count",
-                    "closing_fallback_count",
+                    "session_id", "pid", "cond", "raw_cond",
+                    "session_start", "session_end", "completed_chat",
+                    "turns_completed", "user_messages_count", "topic",
+                    "safety_triggered", "validation_fail_count", "fallback_count",
+                    "closing_validation_fail_count", "closing_fallback_count",
                 ]
             )
 
@@ -233,10 +217,8 @@ def is_very_short_user_input(text: str) -> bool:
 def validate_response(text: str) -> bool:
     if not text:
         return False
-
     raw = (text or "").strip()
     normalized = " ".join(raw.replace("\n", " ").split()).strip()
-
     if not normalized:
         return False
     if "\n" in raw:
@@ -248,28 +230,22 @@ def validate_response(text: str) -> bool:
         return False
     if not normalized.endswith("?"):
         return False
-
     words = normalized.split()
     if len(words) < 10 or len(words) > 80:
         return False
-
     lower = normalized.lower()
     if any(phrase in lower for phrase in FORBIDDEN_PHRASES):
         return False
-
     question_match = re.search(r"(Was|Wie)\b[^?]*\?$", normalized)
     if not question_match:
         return False
-
     return True
 
 
 def validate_closing_response(text: str) -> bool:
     if not text:
         return False
-
     normalized = " ".join((text or "").replace("\n", " ").split()).strip()
-
     if not normalized:
         return False
     if "?" in normalized:
@@ -277,36 +253,23 @@ def validate_closing_response(text: str) -> bool:
     if any(sep in text for sep in ["\n", "- ", "
 2022", "*"]):
         return False
-
     words = normalized.split()
     if len(words) < 10 or len(words) > 60:
         return False
-
     lower = normalized.lower()
     if any(phrase in lower for phrase in FORBIDDEN_PHRASES):
         return False
-
     return True
 
 
 def fallback_reply(cond: str, user_text: str = "") -> str:
     short = (user_text or "").strip().lower()
-
     unsure_forms = {
         "ich wei
-00df nicht",
-        "ich weiss nicht",
-        "wei
-00df nicht",
-        "weiss nicht",
-        "keine ahnung",
-        "nicht sicher",
-        "kp",
-        "idk",
-        "schwer zu sagen",
-        "unsicher",
+00df nicht", "ich weiss nicht", "wei
+00df nicht", "weiss nicht",
+        "keine ahnung", "nicht sicher", "kp", "idk", "schwer zu sagen", "unsicher",
     }
-
     if short in unsure_forms or is_very_short_user_input(user_text):
         variants_high = [
             "Im Moment bleibt noch offen, woran du dieses studienbezogene Thema zuerst festmachst. Wenn du an den Anfang denkst, was f
@@ -324,7 +287,6 @@ def fallback_reply(cond: str, user_text: str = "") -> str:
         ]
         pool = variants_high if cond == "high" else variants_low
         return pool[st.session_state.turn % len(pool)]
-
     variants_high = [
         "Mehrere Punkte rund um dein studienbezogenes Thema stehen gerade nebeneinander. Wenn du an die aktuelle Situation denkst, was tritt zuerst hervor?",
         "In deiner Beschreibung laufen gerade verschiedene studienbezogene Punkte zusammen. Wenn du an diesen Moment denkst, was ist am deutlichsten bemerkbar?",
@@ -467,7 +429,6 @@ def build_system_prompt(cond: str, max_rounds: int) -> str:
 00f6rter.\n"
         "- Auf Deutsch.\n"
     )
-
     low_style = (
         "\nSTILREGELN LOW-BEDINGUNG\n"
         "(angelehnt an einen sachlich-funktionalen, wenig anthropomorphen Stil;\n"
@@ -487,7 +448,6 @@ def build_system_prompt(cond: str, max_rounds: int) -> str:
         "  etwas markieren, nicht als w
 00fcrde jemand mit der Person sprechen.\n"
     )
-
     high_style = (
         "\nSTILREGELN HIGH-BEDINGUNG\n"
         "(angelehnt an einen h
@@ -515,7 +475,6 @@ def build_system_prompt(cond: str, max_rounds: int) -> str:
 00fcber eine eigene Ich-Perspektive des Systems.\n"
         "- Der Fokus-Satz klingt direkt adressiert und personenbezogen, aber professionell distanziert.\n"
     )
-
     if cond == "high":
         return base + high_style
     return base + low_style
@@ -561,7 +520,6 @@ def build_closing_prompt(cond: str, max_rounds: int) -> str:
         "- 15 bis 55 W
 00f6rter.\n"
     )
-
     low_style = (
         "\nSTILREGELN LOW-BEDINGUNG\n"
         "(angelehnt an einen sachlich-funktionalen, wenig anthropomorphen Stil;\n"
@@ -579,7 +537,6 @@ def build_closing_prompt(cond: str, max_rounds: int) -> str:
 00fchl genannt, das beim Aufschieben der wichtigen Aufgabe auftritt. '
         'Damit endet diese kurze Interaktion zu diesem Thema."\n'
     )
-
     high_style = (
         "\nSTILREGELN HIGH-BEDINGUNG\n"
         "(angelehnt an einen h
@@ -602,7 +559,6 @@ def build_closing_prompt(cond: str, max_rounds: int) -> str:
 00fchl benannt, das auftaucht, wenn du diese wichtige Aufgabe aufschiebst. '
         'Damit endet diese kurze Interaktion zu diesem Thema."\n'
     )
-
     if cond == "high":
         return base + high_style
     return base + low_style
@@ -623,7 +579,6 @@ def get_recent_context(messages: List[Dict[str, str]], max_pairs: int = 2) -> st
             i += 2
         else:
             i += 1
-
     recent = pairs[-max_pairs:]
     lines = []
     for u, a in recent:
@@ -641,12 +596,10 @@ def build_api_messages(
     user_text: str,
 ) -> List[Dict[str, str]]:
     recent_context = get_recent_context(st.session_state.messages, max_pairs=2)
-
     user_payload = (
         f"Studienbezogenes Hauptthema der Person: {topic}\n"
         f"Aktuelle Rundenzahl: {turn} von {max_rounds}\n"
     )
-
     if recent_context:
         user_payload += (
             "Bisheriger Gespr
@@ -657,14 +610,12 @@ def build_api_messages(
 00fchere Schritte nur als Hintergrund, nicht zusammenfassen:\n"
             f"{recent_context}\n"
         )
-
     user_payload += (
         f"Unmittelbar letzte Eingabe der Person: {user_text}\n"
         "Formuliere jetzt genau eine Antwort gem
 00e4
 00df allen Regeln."
     )
-
     return [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_payload},
@@ -681,7 +632,6 @@ def call_llm(
 ) -> str:
     client = get_openai_client()
     model_name = get_model_name()
-
     messages = build_api_messages(
         system_prompt=system_prompt,
         topic=topic,
@@ -689,21 +639,17 @@ def call_llm(
         max_rounds=max_rounds,
         user_text=user_text,
     )
-
     st.session_state.last_prompt_excerpt = messages[-1]["content"]
-
     response = client.chat.completions.create(
         model=model_name,
         messages=messages,
         temperature=temperature,
         max_tokens=180,
     )
-
     content = response.choices[0].message.content
     if content is None:
         raise RuntimeError("LLM-Antwort enth
 00e4lt keinen Textinhalt.")
-
     return content.strip()
 
 
@@ -711,13 +657,10 @@ def generate_llm_reply(
     user_text: str, cond: str, topic: str, turn: int, max_rounds: int
 ) -> str:
     system_prompt = build_system_prompt(cond=cond, max_rounds=max_rounds)
-
     st.session_state.last_llm_error = ""
     st.session_state.last_llm_raw_reply = ""
     st.session_state.last_llm_status = ""
-
     temperatures = [0.3, 0.2, 0.1][:MAX_RETRIES]
-
     for attempt, temp in enumerate(temperatures, start=1):
         try:
             raw_reply = call_llm(
@@ -728,13 +671,10 @@ def generate_llm_reply(
                 user_text=user_text,
                 temperature=temp,
             )
-
             st.session_state.last_llm_raw_reply = raw_reply
-
             if validate_response(raw_reply):
                 st.session_state.last_llm_status = f"LLM ok in Versuch {attempt}"
                 return " ".join(raw_reply.split())
-
             st.session_state.validation_fail_count += 1
             st.session_state.last_llm_error = (
                 f"Validierung fehlgeschlagen in Versuch {attempt}: {raw_reply}"
@@ -743,12 +683,10 @@ def generate_llm_reply(
                 f"Validierung fehlgeschlagen in Versuch {attempt}"
             )
             time.sleep(0.4)
-
         except Exception as e:
             st.session_state.last_llm_error = f"{type(e).__name__}: {e}"
             st.session_state.last_llm_status = f"Fehler in Versuch {attempt}"
             time.sleep(0.7)
-
     st.session_state.fallback_count += 1
     st.session_state.last_llm_status = "Fallback ausgel
 00f6st"
@@ -759,13 +697,10 @@ def generate_closing_reply(
     user_text: str, cond: str, topic: str, turn: int, max_rounds: int
 ) -> str:
     system_prompt = build_closing_prompt(cond=cond, max_rounds=max_rounds)
-
     st.session_state.last_llm_error = ""
     st.session_state.last_llm_raw_reply = ""
     st.session_state.last_llm_status = ""
-
     temperatures = [0.2, 0.1, 0.0][:MAX_RETRIES]
-
     for attempt, temp in enumerate(temperatures, start=1):
         try:
             raw_reply = call_llm(
@@ -776,13 +711,10 @@ def generate_closing_reply(
                 user_text=user_text,
                 temperature=temp,
             )
-
             st.session_state.last_llm_raw_reply = raw_reply
-
             if validate_closing_response(raw_reply):
                 st.session_state.last_llm_status = f"Closing ok in Versuch {attempt}"
                 return " ".join(raw_reply.split())
-
             st.session_state.closing_validation_fail_count += 1
             st.session_state.last_llm_error = (
                 f"Closing-Validierung fehlgeschlagen in Versuch {attempt}: {raw_reply}"
@@ -791,12 +723,10 @@ def generate_closing_reply(
                 f"Closing-Validierung fehlgeschlagen in Versuch {attempt}"
             )
             time.sleep(0.4)
-
         except Exception as e:
             st.session_state.last_llm_error = f"{type(e).__name__}: {e}"
             st.session_state.last_llm_status = f"Closing-Fehler in Versuch {attempt}"
             time.sleep(0.7)
-
     st.session_state.closing_fallback_count += 1
     st.session_state.last_llm_status = "Closing-Fallback ausgel
 00f6st"
@@ -863,7 +793,6 @@ def init_state():
         "chat_completed": False,
         "safety_triggered": False,
         "closing_logged": False,
-        "pending_finish": False,
         "user_messages_count": 0,
         "validation_fail_count": 0,
         "fallback_count": 0,
@@ -891,9 +820,7 @@ def log_message(role: str, text: str):
         text,
         now_iso(),
     ]
-
     gsheet_append_log(row)
-
     try:
         with open(LOG_FILE, "a", newline="", encoding="utf-8") as f:
             csv.writer(f).writerow(row)
@@ -906,7 +833,6 @@ def write_summary_once():
         return
 
     session_end = now_iso()
-
     row = [
         st.session_state.session_id,
         st.session_state.pid,
@@ -924,16 +850,12 @@ def write_summary_once():
         st.session_state.closing_validation_fail_count,
         st.session_state.closing_fallback_count,
     ]
-
     try:
         gsheet_append_session(row)
-
         with open(SUMMARY_FILE, "a", newline="", encoding="utf-8") as f:
             csv.writer(f).writerow(row)
-
         st.session_state.session_end = session_end
         st.session_state.summary_saved = True
-
     except Exception as e:
         st.session_state.gsheet_error = str(e)
 
@@ -941,7 +863,6 @@ def write_summary_once():
 def render_debug_sidebar():
     if not st.session_state.debug_mode:
         return
-
     with st.sidebar:
         st.markdown("### Debug")
         st.write(
@@ -953,7 +874,6 @@ def render_debug_sidebar():
                 "rounds": st.session_state.max_rounds,
                 "turn": st.session_state.turn,
                 "phase": st.session_state.phase,
-                "pending_finish": st.session_state.pending_finish,
                 "summary_saved": st.session_state.summary_saved,
                 "session_id": st.session_state.session_id,
                 "model": get_model_name(),
@@ -964,18 +884,14 @@ def render_debug_sidebar():
                 "gsheet_error": st.session_state.gsheet_error,
             }
         )
-
         if st.session_state.last_llm_status:
             st.info(st.session_state.last_llm_status)
-
         if st.session_state.last_llm_error:
             st.error("Letzter LLM-Fehler")
             st.code(st.session_state.last_llm_error)
-
         if st.session_state.last_llm_raw_reply:
             st.write("Letzte rohe Modellantwort:")
             st.code(st.session_state.last_llm_raw_reply)
-
         if st.session_state.last_prompt_excerpt:
             st.write("Letzter Prompt-Ausschnitt:")
             st.code(st.session_state.last_prompt_excerpt)
@@ -1033,16 +949,11 @@ elif st.session_state.phase == "chat":
         with st.chat_message(msg["role"]):
             st.write(msg["content"])
 
-    if st.session_state.pending_finish:
-        st.session_state.phase = "closing"
-        st.rerun()
-
-    if (
-        st.session_state.turn >= st.session_state.max_rounds
-        and not st.session_state.pending_finish
-    ):
+    # Fallback: falls turn schon am Limit ist ohne dass is_last_turn es gefangen hat
+    if st.session_state.turn >= st.session_state.max_rounds:
         st.session_state.chat_completed = True
-        st.session_state.pending_finish = True
+        st.session_state.phase = "closing"
+        write_summary_once()
         st.rerun()
 
     user_input = st.chat_input("Schreibe hier deine Antwort ...")
@@ -1053,7 +964,6 @@ elif st.session_state.phase == "chat":
             st.session_state.messages.append({"role": "user", "content": user_input})
             log_message("user", user_input)
             st.session_state.user_messages_count += 1
-
             safety_msg = (
                 "Dein Text enth
 00e4lt Hinweise auf starke Belastung oder eine m
@@ -1092,7 +1002,6 @@ elif st.session_state.phase == "chat":
                         turn=st.session_state.turn + 1,
                         max_rounds=st.session_state.max_rounds,
                     )
-
                 st.write(reply)
 
         st.session_state.messages.append({"role": "assistant", "content": reply})
@@ -1102,13 +1011,13 @@ elif st.session_state.phase == "chat":
         if is_last_turn:
             st.session_state.chat_completed = True
             st.session_state.closing_logged = True
+            st.session_state.phase = "closing"  # direkt setzen, kein pending_finish
             write_summary_once()
-            st.session_state.pending_finish = True
 
         st.rerun()
 
 elif st.session_state.phase == "closing":
-    write_summary_once()
+    write_summary_once()  # zweite Absicherung
 
     st.subheader(f"Thema: {st.session_state.topic}")
 
@@ -1117,8 +1026,9 @@ elif st.session_state.phase == "closing":
             st.write(msg["content"])
 
     st.info(
-        "Die kurze Interaktion zu deinem studienbezogenen Thema ist jetzt abgeschlossen. "
-        "Bitte klicke jetzt auf den Button, erst dann werden deine Daten gespeichert. "
+        "Bitte dr
+00fccke jetzt auf den Button \u2014 erst dann werden deine Antworten gespeichert "
+        "und du gelangst zum Fragebogen."
     )
 
     if st.button("Weiter zum Fragebogen", type="primary"):
@@ -1140,7 +1050,7 @@ elif st.session_state.phase == "safety":
         st.rerun()
 
 elif st.session_state.phase == "finished":
-    write_summary_once()
+    write_summary_once()  # letzte Absicherung
     st.success("Der Chatteil ist beendet.")
     st.write(
         "Vielen Dank f
@@ -1166,37 +1076,20 @@ elif st.session_state.phase == "finished":
     if st.session_state.debug_mode:
         if st.session_state.gsheet_error:
             st.error(f"Google Sheets Fehler: {st.session_state.gsheet_error}")
-
         st.markdown("### Sitzungsdaten")
         if LOG_FILE.exists():
             df = pd.read_csv(LOG_FILE)
             session_df = df[df["session_id"] == st.session_state.session_id]
             st.dataframe(session_df, use_container_width=True)
-
         if st.button("Neue Testsitzung starten"):
             for key in [
-                "phase",
-                "messages",
-                "turn",
-                "session_id",
-                "session_start",
-                "session_end",
-                "summary_saved",
-                "chat_completed",
-                "topic",
-                "safety_triggered",
-                "closing_logged",
-                "pending_finish",
-                "user_messages_count",
-                "validation_fail_count",
-                "fallback_count",
-                "closing_validation_fail_count",
-                "closing_fallback_count",
-                "last_llm_error",
-                "last_llm_raw_reply",
-                "last_llm_status",
-                "last_prompt_excerpt",
-                "gsheet_error",
+                "phase", "messages", "turn", "session_id", "session_start",
+                "session_end", "summary_saved", "chat_completed", "topic",
+                "safety_triggered", "closing_logged", "user_messages_count",
+                "validation_fail_count", "fallback_count",
+                "closing_validation_fail_count", "closing_fallback_count",
+                "last_llm_error", "last_llm_raw_reply", "last_llm_status",
+                "last_prompt_excerpt", "gsheet_error",
             ]:
                 if key in st.session_state:
                     del st.session_state[key]
